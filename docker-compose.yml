@@ -1,0 +1,82 @@
+services:
+  postgres:
+    image: postgres:16.2-alpine
+    container_name: igrejahub-postgres
+    environment:
+      POSTGRES_DB: igrejahub
+      POSTGRES_USER: igrejahub
+      POSTGRES_PASSWORD: igrejahub123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U igrejahub -d igrejahub"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - igrejahub-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.2.4-alpine
+    container_name: igrejahub-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - igrejahub-network
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: igrejahub-api
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=igrejahub
+      - DB_USER=igrejahub
+      - DB_PASSWORD=igrejahub123
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # IMPORTANTE: substitua JWT_SECRET por um valor secreto real antes de ir a produção.
+      # Gere com: openssl rand -base64 64
+      - JWT_SECRET=${JWT_SECRET:-default-secret-key-change-in-production-very-long-secret-key-for-hs512}
+      - JWT_ACCESS_EXPIRATION=900
+      - JWT_REFRESH_EXPIRATION=604800
+      - ROOT_EMAIL=${ROOT_EMAIL:-admin@igrejahub.com}
+      - FRONTEND_URL=http://2.24.80.229:5000
+      - CORS_ALLOWED_ORIGINS=http://2.24.80.229:5000,http://localhost:5000,http://localhost:3000,http://2.24.80.229:3000
+      # A API roda na porta 8080 (padrão Spring Boot). SERVER_PORT deve ser 8080.
+      - SERVER_PORT=3000
+      - LOG_LEVEL=INFO
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - igrejahub-network
+    restart: unless-stopped
+    volumes:
+      - uploads_data:/app/uploads
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads_data:
+
+networks:
+  igrejahub-network:
+    driver: bridge

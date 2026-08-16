@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="admin/layout :: head">
+    <title>Dashboard - IgrejaHub Admin</title>
+</head>
+<body>
+<div th:replace="admin/layout :: body">
+    <div th:fragment="content">
+        <div class="row">
+            <div class="col-lg-3 col-6">
+                <div class="small-box bg-info">
+                    <div class="inner">
+                        <h3 th:text="${totalMembers} ?: 0"></h3>
+                        <p>Total de Membros</p>
+                    </div>
+                    <div class="icon">
+                        <i class="fas fa-user-friends"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-3 col-6">
+                <div class="small-box bg-success">
+                    <div class="inner">
+                        <h3 th:text="${totalChurches} ?: 0"></h3>
+                        <p>Igrejas</p>
+                    </div>
+                    <div class="icon">
+                        <i class="fas fa-church"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-3 col-6">
+                <div class="small-box bg-warning">
+                    <div class="inner">
+                        <h3 th:text="${totalCongregations} ?: 0"></h3>
+                        <p>Congregações</p>
+                    </div>
+                    <div class="icon">
+                        <i class="fas fa-building"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-3 col-6">
+                <div class="small-box bg-danger">
+                    <div class="inner">
+                        <h3>R$ <span th:text="${monthlyRevenue} ?: '0,00'"></span></h3>
+                        <p>Receita do Mês</p>
+                    </div>
+                    <div class="icon">
+                        <i class="fas fa-money-bill-wave"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>
