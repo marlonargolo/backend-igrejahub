@@ -13,59 +13,52 @@ import java.time.Duration;
 public class RateLimitingService {
 
     private final RedisTemplate<String, String> redisTemplate;
-    
-    private static final int MAX_ATTEMPTS = 5;
+
+    // 10 tentativas de login em 5 minutos antes de bloquear
+    private static final int MAX_LOGIN_ATTEMPTS = 10;
+    private static final int WINDOW_MINUTES = 5;
     private static final int BLOCK_DURATION_MINUTES = 15;
-    private static final int WINDOW_MINUTES = 1;
 
-    public boolean tryRequest(String clientIp) {
-        String key = "rate_limit:" + clientIp;
-        String blockKey = "blocked:" + clientIp;
-
-        // Verificar se está bloqueado
+    public boolean tryLoginRequest(String clientIp) {
+        String blockKey = "login_blocked:" + clientIp;
         if (Boolean.TRUE.equals(redisTemplate.hasKey(blockKey))) {
             return false;
         }
 
-        String currentCount = redisTemplate.opsForValue().get(key);
-        
-        if (currentCount == null) {
-            // Primeira tentativa
-            redisTemplate.opsForValue().set(key, "1", Duration.ofMinutes(WINDOW_MINUTES));
+        String countKey = "login_attempts:" + clientIp;
+        String current = redisTemplate.opsForValue().get(countKey);
+
+        if (current == null) {
+            redisTemplate.opsForValue().set(countKey, "1", Duration.ofMinutes(WINDOW_MINUTES));
             return true;
         }
 
-        int count = Integer.parseInt(currentCount);
-        if (count >= MAX_ATTEMPTS) {
-            // Bloquear o IP
-            blockClient(clientIp);
+        int count = Integer.parseInt(current);
+        if (count >= MAX_LOGIN_ATTEMPTS) {
+            redisTemplate.opsForValue().set(
+                blockKey, "blocked", Duration.ofMinutes(BLOCK_DURATION_MINUTES));
+            log.warn("IP {} bloqueado por {} minutos após {} tentativas de login",
+                clientIp, BLOCK_DURATION_MINUTES, count);
             return false;
         }
 
-        // Incrementar contador
-        redisTemplate.opsForValue().increment(key);
+        redisTemplate.opsForValue().increment(countKey);
         return true;
     }
 
-    public boolean isBlocked(String clientIp) {
-        String blockKey = "blocked:" + clientIp;
-        return Boolean.TRUE.equals(redisTemplate.hasKey(blockKey));
+    // Mantido para compatibilidade com AuthenticationService
+    public boolean tryRequest(String clientIp) {
+        return tryLoginRequest(clientIp);
     }
 
-    private void blockClient(String clientIp) {
-        String blockKey = "blocked:" + clientIp;
-        redisTemplate.opsForValue().set(
-            blockKey, 
-            "blocked", 
-            Duration.ofMinutes(BLOCK_DURATION_MINUTES)
-        );
-        log.warn("IP {} bloqueado por {} minutos", clientIp, BLOCK_DURATION_MINUTES);
+    public boolean isBlocked(String clientIp) {
+        return Boolean.TRUE.equals(redisTemplate.hasKey("login_blocked:" + clientIp));
     }
 
     public void resetAttempts(String clientIp) {
-        String key = "rate_limit:" + clientIp;
-        redisTemplate.delete(key);
-        String blockKey = "blocked:" + clientIp;
-        redisTemplate.delete(blockKey);
+        redisTemplate.delete("login_attempts:" + clientIp);
+        redisTemplate.delete("login_blocked:" + clientIp);
+        redisTemplate.delete("rate_limit:" + clientIp);
+        redisTemplate.delete("blocked:" + clientIp);
     }
 }

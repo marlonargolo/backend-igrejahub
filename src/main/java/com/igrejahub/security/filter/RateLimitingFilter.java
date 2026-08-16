@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.Set;
 
 @Slf4j
 @Component
@@ -22,49 +23,58 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     private final RateLimitingService rateLimitingService;
     private final ApplicationProperties appProperties;
 
+    // Apenas estes endpoints sofrem rate limiting — todos os outros são livres
+    private static final Set<String> RATE_LIMITED_PATHS = Set.of(
+        "/api/auth/login",
+        "/api/auth/register",
+        "/auth/login",
+        "/auth/register"
+    );
+
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain filterChain)
             throws ServletException, IOException {
+
         String path = request.getRequestURI();
-        
-        // Aplicar rate limiting apenas em endpoints de autenticação
-        if (path.startsWith("/auth/") || path.startsWith("/api/auth/")) {
+
+        if (RATE_LIMITED_PATHS.contains(path)) {
             String clientIp = getClientIp(request);
-            
-            // Verificar se o IP está bloqueado
+
             if (rateLimitingService.isBlocked(clientIp)) {
-                log.warn("IP bloqueado por excesso de tentativas: {}", clientIp);
-                response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
-                response.getWriter().write("{\"error\": \"Too many requests. Please try again later.\"}");
+                log.warn("IP bloqueado tentando acessar {}: {}", path, clientIp);
+                writeError(response, HttpStatus.TOO_MANY_REQUESTS,
+                    "Muitas tentativas de login. Aguarde 15 minutos e tente novamente.");
                 return;
             }
-            
-            // Tentar registrar a requisição
-            boolean allowed = rateLimitingService.tryRequest(clientIp);
+
+            boolean allowed = rateLimitingService.tryLoginRequest(clientIp);
             if (!allowed) {
-                log.warn("Rate limit excedido para IP: {}", clientIp);
-                response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
-                response.getWriter().write("{\"error\": \"Rate limit exceeded. Please try again later.\"}");
+                log.warn("Rate limit de login excedido para IP: {}", clientIp);
+                writeError(response, HttpStatus.TOO_MANY_REQUESTS,
+                    "Muitas tentativas de login. Aguarde 15 minutos e tente novamente.");
                 return;
             }
         }
-        
+
         filterChain.doFilter(request, response);
     }
 
-    /**
-     * Só confia em X-Forwarded-For/etc quando a requisição chega diretamente de um proxy
-     * reverso confiável (app.trusted-proxies); caso contrário, o header é forjável pelo
-     * próprio cliente e usá-lo permitiria burlar o rate limit trocando o valor a cada tentativa.
-     */
+    private void writeError(HttpServletResponse response, HttpStatus status, String message)
+            throws IOException {
+        response.setStatus(status.value());
+        response.setContentType("application/json;charset=UTF-8");
+        response.getWriter().write(
+            "{\"code\":\"RATE_LIMIT_EXCEEDED\",\"message\":\"" + message + "\"}"
+        );
+    }
+
     private String getClientIp(HttpServletRequest request) {
         String remoteAddr = request.getRemoteAddr();
         if (!appProperties.getTrustedProxies().contains(remoteAddr)) {
             return remoteAddr;
         }
-
         String ip = request.getHeader("X-Forwarded-For");
         if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
             ip = request.getHeader("Proxy-Client-IP");
