@@ -20,6 +20,8 @@ public class CreateMemberRequest {
     private String name;
     private String email;
     private String phone;
+    private String rg;
+    private String cpf;
     private LocalDate birthDate;
     private String gender;
     private String maritalStatus;
@@ -28,5 +30,7 @@ public class CreateMemberRequest {
     private LocalDate memberSince;
     private String address;
     private String notes;
+    private String cargo;
+    private String funcoes;
     private String role;
 }

@@ -11,11 +11,11 @@ import java.time.LocalDate;
 @NoArgsConstructor
 @AllArgsConstructor
 public class UpdateMemberRequest {
-    private Long churchId;
-    private Long congregationId;
     private String name;
     private String email;
     private String phone;
+    private String rg;
+    private String cpf;
     private LocalDate birthDate;
     private String gender;
     private String maritalStatus;
@@ -24,7 +24,8 @@ public class UpdateMemberRequest {
     private LocalDate memberSince;
     private String address;
     private String notes;
-    private String avatarUrl;
+    private String cargo;
+    private String funcoes;
     private String role;
     private String status;
 }

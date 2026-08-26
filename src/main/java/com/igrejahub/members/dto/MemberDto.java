@@ -19,6 +19,8 @@ public class MemberDto {
     private String name;
     private String email;
     private String phone;
+    private String rg;
+    private String cpf;
     private LocalDate birthDate;
     private String gender;
     private String maritalStatus;
@@ -28,6 +30,8 @@ public class MemberDto {
     private String address;
     private String notes;
     private String avatarUrl;
+    private String cargo;
+    private String funcoes;
     private String role;
     private String status;
 }

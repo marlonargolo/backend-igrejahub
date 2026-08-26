@@ -19,6 +19,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 @Slf4j
 @Service
@@ -31,6 +32,7 @@ public class UserService {
     private final PasswordEncoder passwordEncoder;
     private final UserMapper userMapper;
     private final SecurityUtils securityUtils;
+    private final JdbcTemplate jdbcTemplate;
 
     public Page<UserDto> getUsers(Pageable pageable, String search) {
         Long organizationId = TenantContext.getCurrentTenant();
@@ -66,11 +68,17 @@ public class UserService {
         user.setOrganizationId(organizationId);
         user.setActive(request.getActive() != null ? request.getActive() : true);
         user.setVerified(false);
+        if (request.getChurchId() != null) {
+            user.setChurchId(request.getChurchId());
+        }
 
         if (request.getRoleIds() != null && !request.getRoleIds().isEmpty()) {
             for (Long roleId : request.getRoleIds()) {
                 roleRepository.findById(roleId).ifPresent(user.getRoles()::add);
             }
+        } else if (request.getRoleName() != null && !request.getRoleName().isBlank()) {
+            roleRepository.findByName(request.getRoleName())
+                .ifPresent(user.getRoles()::add);
         }
 
         user = userRepository.save(user);
@@ -128,5 +136,44 @@ public class UserService {
 
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
         userRepository.save(user);
+    }
+
+    public java.util.List<java.util.Map<String,Object>> getUserChurches(Long userId) {
+        return jdbcTemplate.queryForList(
+            "SELECT c.id, c.name, c.city, c.state FROM churches c " +
+            "JOIN user_church_access uca ON c.id = uca.church_id " +
+            "WHERE uca.user_id = ?", userId);
+    }
+
+    @Transactional
+    public void setUserChurches(Long userId, java.util.Set<Long> churchIds) {
+        jdbcTemplate.update("DELETE FROM user_church_access WHERE user_id = ?", userId);
+        if (churchIds != null) {
+            for (Long churchId : churchIds) {
+                jdbcTemplate.update(
+                    "INSERT INTO user_church_access(user_id, church_id) VALUES(?,?) ON CONFLICT DO NOTHING",
+                    userId, churchId);
+            }
+        }
+    }
+
+    public java.util.List<java.util.Map<String,Object>> getUserCongregations(Long userId) {
+        return jdbcTemplate.queryForList(
+            "SELECT cg.id, cg.name, cg.church_id, c.name as church_name FROM congregations cg " +
+            "JOIN user_congregation_access uca ON cg.id = uca.congregation_id " +
+            "JOIN churches c ON c.id = cg.church_id " +
+            "WHERE uca.user_id = ?", userId);
+    }
+
+    @Transactional
+    public void setUserCongregations(Long userId, java.util.Set<Long> congregationIds) {
+        jdbcTemplate.update("DELETE FROM user_congregation_access WHERE user_id = ?", userId);
+        if (congregationIds != null) {
+            for (Long congId : congregationIds) {
+                jdbcTemplate.update(
+                    "INSERT INTO user_congregation_access(user_id, congregation_id) VALUES(?,?) ON CONFLICT DO NOTHING",
+                    userId, congId);
+            }
+        }
     }
 }

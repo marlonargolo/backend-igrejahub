@@ -29,10 +29,10 @@ public class MemberService {
     private final ChurchRepository churchRepository;
     private final CongregationRepository congregationRepository;
 
-    public Page<MemberDto> getMembers(Pageable pageable, Long congregationId, String status, String search) {
+    public Page<MemberDto> getMembers(Pageable pageable, Long churchId, Long congregationId, String status, String search) {
         Long organizationId = TenantContext.getCurrentTenant();
         String normalizedSearch = search != null && !search.isEmpty() ? search : null;
-        return memberRepository.search(organizationId, congregationId, status, normalizedSearch, pageable)
+        return memberRepository.search(organizationId, churchId, congregationId, status, normalizedSearch, pageable)
             .map(this::toDto);
     }
 
@@ -50,7 +50,8 @@ public class MemberService {
     public MemberDto createMember(CreateMemberRequest request) {
         Long organizationId = TenantContext.getCurrentTenant();
 
-        if (request.getChurchId() != null && !churchRepository.existsByOrganizationIdAndId(organizationId, request.getChurchId())) {
+        if (request.getChurchId() != null
+                && !churchRepository.existsByOrganizationIdAndId(organizationId, request.getChurchId())) {
             throw new BusinessException("Igreja não encontrada ou não pertence à sua organização");
         }
         if (request.getCongregationId() != null
@@ -65,6 +66,8 @@ public class MemberService {
         member.setName(request.getName());
         member.setEmail(request.getEmail());
         member.setPhone(request.getPhone());
+        member.setRg(request.getRg());
+        member.setCpf(request.getCpf());
         member.setBirthDate(request.getBirthDate());
         member.setGender(request.getGender());
         member.setMaritalStatus(request.getMaritalStatus());
@@ -73,7 +76,9 @@ public class MemberService {
         member.setMemberSince(request.getMemberSince() != null ? request.getMemberSince() : LocalDate.now());
         member.setAddress(request.getAddress());
         member.setNotes(request.getNotes());
-        member.setRole(request.getRole());
+        member.setCargo(request.getCargo());
+        member.setFuncoes(request.getFuncoes());
+        member.setRole(request.getCargo()); // compatibilidade
         member.setStatus("ACTIVE");
 
         member = memberRepository.save(member);
@@ -92,13 +97,16 @@ public class MemberService {
         if (request.getName() != null) member.setName(request.getName());
         if (request.getEmail() != null) member.setEmail(request.getEmail());
         if (request.getPhone() != null) member.setPhone(request.getPhone());
+        if (request.getRg() != null) member.setRg(request.getRg());
+        if (request.getCpf() != null) member.setCpf(request.getCpf());
         if (request.getBirthDate() != null) member.setBirthDate(request.getBirthDate());
         if (request.getGender() != null) member.setGender(request.getGender());
         if (request.getMaritalStatus() != null) member.setMaritalStatus(request.getMaritalStatus());
         if (request.getProfession() != null) member.setProfession(request.getProfession());
         if (request.getAddress() != null) member.setAddress(request.getAddress());
         if (request.getNotes() != null) member.setNotes(request.getNotes());
-        if (request.getRole() != null) member.setRole(request.getRole());
+        if (request.getCargo() != null) { member.setCargo(request.getCargo()); member.setRole(request.getCargo()); }
+        if (request.getFuncoes() != null) member.setFuncoes(request.getFuncoes());
         if (request.getStatus() != null) member.setStatus(request.getStatus());
 
         member = memberRepository.save(member);
@@ -126,6 +134,8 @@ public class MemberService {
         dto.setName(entity.getName());
         dto.setEmail(entity.getEmail());
         dto.setPhone(entity.getPhone());
+        dto.setRg(entity.getRg());
+        dto.setCpf(entity.getCpf());
         dto.setBirthDate(entity.getBirthDate());
         dto.setGender(entity.getGender());
         dto.setMaritalStatus(entity.getMaritalStatus());
@@ -135,8 +145,18 @@ public class MemberService {
         dto.setAddress(entity.getAddress());
         dto.setNotes(entity.getNotes());
         dto.setAvatarUrl(entity.getAvatarUrl());
+        dto.setCargo(entity.getCargo());
+        dto.setFuncoes(entity.getFuncoes());
         dto.setRole(entity.getRole());
         dto.setStatus(entity.getStatus());
         return dto;
+    }
+
+    @Transactional
+    public void updateAvatar(Long id, String avatarUrl) {
+        Member member = memberRepository.findById(id)
+            .orElseThrow(() -> new com.igrejahub.common.exception.ResourceNotFoundException("Member", id));
+        member.setAvatarUrl(avatarUrl);
+        memberRepository.save(member);
     }
 }

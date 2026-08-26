@@ -29,4 +29,6 @@ public class CreateUserRequest {
     private String phone;
     private Set<Long> roleIds;
     private Boolean active;
+    private String roleName;  // Alternativa a roleIds — aceita nome do role (ADMIN, TESOUREIRO, etc.)
+    private Long churchId;    // Igreja vinculada ao usuário
 }

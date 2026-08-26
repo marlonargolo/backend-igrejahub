@@ -116,3 +116,13 @@ springdoc:
     try-it-out-enabled: true
     persist-authorization: true
   show-actuator: false
+
+servlet:
+    multipart:
+      enabled: true
+      max-file-size: 5MB
+      max-request-size: 10MB
+
+web:
+    resources:
+      static-locations: file:/app/uploads/,classpath:/static/

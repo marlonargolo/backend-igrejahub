@@ -11,6 +11,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class MemberFilterDto {
     private String search;
+    private Long churchId;
     private Long congregationId;
     private String status;
     private String role;

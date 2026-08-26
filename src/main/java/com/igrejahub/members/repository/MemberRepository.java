@@ -23,10 +23,12 @@ public interface MemberRepository extends BaseRepository<Member, Long> {
      * ou usar CAST explícito. Usamos CAST(:search AS text) para garantir o tipo.
      */
     @Query("SELECT m FROM Member m WHERE m.organizationId = :orgId " +
+           "AND (:churchId IS NULL OR m.churchId = :churchId) " +
            "AND (:congregationId IS NULL OR m.congregationId = :congregationId) " +
            "AND (:status IS NULL OR m.status = :status) " +
            "AND (:search IS NULL OR LOWER(m.name) LIKE LOWER(CAST(:search AS string)))")
     Page<Member> search(@Param("orgId") Long orgId,
+                        @Param("churchId") Long churchId,
                         @Param("congregationId") Long congregationId,
                         @Param("status") String status,
                         @Param("search") String search,

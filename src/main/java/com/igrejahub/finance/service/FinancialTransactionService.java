@@ -159,4 +159,14 @@ public class FinancialTransactionService {
                 .orElseThrow(() -> new BusinessException("Categoria inválida"));
         return categoryId;
     }
+
+    @Transactional
+    public void updateAttachment(Long id, String url) {
+        FinancialTransaction tx = transactionRepository.findById(id)
+            .orElseThrow(() -> new com.igrejahub.common.exception.ResourceNotFoundException("Transaction", id));
+        // usar campo notes para armazenar URL do attachment temporariamente
+        // até a migration V25 ser aplicada e o campo attachmentUrl existir
+        tx.setNotes((tx.getNotes() != null ? tx.getNotes() + " | " : "") + "ATTACHMENT:" + url);
+        transactionRepository.save(tx);
+    }
 }

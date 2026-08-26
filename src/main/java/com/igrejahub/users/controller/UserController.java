@@ -12,6 +12,8 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import java.util.List;
+import java.util.Set;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -95,5 +97,35 @@ public class UserController {
     public ResponseEntity<ApiResponse<Void>> changePassword(@Valid @RequestBody ChangePasswordRequest request) {
         userService.changePassword(request);
         return ResponseEntity.ok(ApiResponse.success());
+    }
+
+    @Operation(summary = "Listar igrejas vinculadas ao usuário")
+    @GetMapping("/{id}/churches")
+    public ResponseEntity<ApiResponse<java.util.List<java.util.Map<String,Object>>>> getUserChurches(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success(userService.getUserChurches(id)));
+    }
+
+    @Operation(summary = "Vincular igrejas ao usuário")
+    @PutMapping("/{id}/churches")
+    public ResponseEntity<ApiResponse<Void>> setUserChurches(
+            @PathVariable Long id,
+            @RequestBody java.util.Set<Long> churchIds) {
+        userService.setUserChurches(id, churchIds);
+        return ResponseEntity.ok(ApiResponse.success());
+    }
+
+    @Operation(summary = "Vincular congregações ao usuário")
+    @PutMapping("/{id}/congregations")
+    public ResponseEntity<ApiResponse<Void>> setUserCongregations(
+            @PathVariable Long id,
+            @RequestBody java.util.Set<Long> congregationIds) {
+        userService.setUserCongregations(id, congregationIds);
+        return ResponseEntity.ok(ApiResponse.success());
+    }
+
+    @Operation(summary = "Listar congregações vinculadas ao usuário")
+    @GetMapping("/{id}/congregations")
+    public ResponseEntity<ApiResponse<java.util.List<java.util.Map<String,Object>>>> getUserCongregations(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success(userService.getUserCongregations(id)));
     }
 }

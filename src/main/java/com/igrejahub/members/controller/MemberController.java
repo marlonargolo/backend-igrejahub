@@ -18,6 +18,19 @@ import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import com.igrejahub.members.dto.CreateOccurrenceRequest;
+import com.igrejahub.members.dto.MemberOccurrenceDto;
+import com.igrejahub.members.service.MemberOccurrenceService;
+import java.util.List;
+import org.springframework.http.MediaType;
+import org.springframework.web.multipart.MultipartFile;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Map;
+import java.util.UUID;
+
 
 @RestController
 @RequestMapping("/members")
@@ -37,7 +50,7 @@ public class MemberController {
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String search) {
 
-        Page<MemberDto> page = memberService.getMembers(pageable, congregationId, status, search);
+        Page<MemberDto> page = memberService.getMembers(pageable, null, congregationId, status, search);
 
         PaginatedResponse<MemberDto> response = PaginatedResponse.<MemberDto>builder()
             .data(page.getContent())
@@ -81,5 +94,46 @@ public class MemberController {
     public ResponseEntity<ApiResponse<Void>> deleteMember(@PathVariable Long id) {
         memberService.deleteMember(id);
         return ResponseEntity.ok(ApiResponse.success());
+    }
+
+    private final MemberOccurrenceService occurrenceService;
+
+    @GetMapping("/{id}/occurrences")
+    public ResponseEntity<ApiResponse<List<MemberOccurrenceDto>>> getOccurrences(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success(occurrenceService.getOccurrences(id)));
+    }
+
+    @PostMapping("/{id}/occurrences")
+    public ResponseEntity<ApiResponse<MemberOccurrenceDto>> createOccurrence(
+            @PathVariable Long id,
+            @Valid @RequestBody CreateOccurrenceRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(occurrenceService.createOccurrence(id, request)));
+    }
+
+    @DeleteMapping("/{id}/occurrences/{occurrenceId}")
+    public ResponseEntity<ApiResponse<Void>> deleteOccurrence(
+            @PathVariable Long id,
+            @PathVariable Long occurrenceId) {
+        occurrenceService.deleteOccurrence(occurrenceId);
+        return ResponseEntity.ok(ApiResponse.success());
+    }
+
+    @Operation(summary = "Upload de avatar do membro")
+    @PostMapping(value = "/{id}/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<Map<String, String>>> uploadAvatar(
+            @PathVariable Long id,
+            @RequestParam("file") MultipartFile file) throws IOException {
+        String ext = "";
+        String originalName = file.getOriginalFilename();
+        if (originalName != null && originalName.contains(".")) {
+            ext = originalName.substring(originalName.lastIndexOf("."));
+        }
+        String fileName = "member_" + id + "_" + UUID.randomUUID() + ext;
+        Path uploadDir = Paths.get("/app/uploads/avatars");
+        Files.createDirectories(uploadDir);
+        file.transferTo(uploadDir.resolve(fileName).toFile());
+        String avatarUrl = "/api/files/avatars/" + fileName;
+        memberService.updateAvatar(id, avatarUrl);
+        return ResponseEntity.ok(ApiResponse.success(Map.of("avatarUrl", avatarUrl)));
     }
 }

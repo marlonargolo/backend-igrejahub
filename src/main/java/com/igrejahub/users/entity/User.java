@@ -78,4 +78,7 @@ public class User extends BaseEntity {
         }
         return lockedUntil.isAfter(LocalDateTime.now());
     }
+
+    @jakarta.persistence.Column(name = "church_id")
+    private Long churchId;
 }
