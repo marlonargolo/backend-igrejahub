@@ -1,11 +1,6 @@
 package com.igrejahub.auth.service;
 
-import com.igrejahub.auth.dto.LoginRequest;
-import com.igrejahub.auth.dto.LoginResponse;
-import com.igrejahub.auth.dto.RefreshTokenRequest;
-import com.igrejahub.auth.dto.RefreshTokenResponse;
-import com.igrejahub.auth.dto.RegisterRequest;
-import com.igrejahub.auth.dto.UserInfoDto;
+import com.igrejahub.auth.dto.*;
 import com.igrejahub.common.exception.BusinessException;
 import com.igrejahub.config.ApplicationProperties;
 import com.igrejahub.organizations.entity.Organization;
@@ -47,7 +42,7 @@ public class AuthenticationService {
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
 
-    private static final int MAX_FAILED_ATTEMPTS = 5;
+    private static final int MAX_FAILED_ATTEMPTS  = 5;
     private static final int LOCK_DURATION_MINUTES = 15;
 
     @Transactional
@@ -58,59 +53,59 @@ public class AuthenticationService {
             );
             SecurityContextHolder.getContext().setAuthentication(authentication);
             UserPrincipal userPrincipal = (UserPrincipal) authentication.getPrincipal();
+
             User user = userRepository.findById(userPrincipal.getId())
                 .orElseThrow(() -> new BusinessException("Usuário não encontrado"));
             if (!user.isActive()) throw new BusinessException("Usuário inativo");
             if (user.isLocked()) throw new LockedException("Conta bloqueada temporariamente");
+
             user.resetFailedAttempts();
             user.setLastLoginAt(LocalDateTime.now());
             user.setLastLoginIp(ip);
             userRepository.save(user);
             rateLimitingService.resetAttempts(ip);
-            String accessToken = jwtService.generateAccessToken(userPrincipal);
-            String refreshToken = jwtService.generateRefreshToken(userPrincipal);
+
+            // Reconstruir UserPrincipal do banco para garantir churchId/congregationId atualizados
+            UserPrincipal principalWithScope = new UserPrincipal(user);
+            String accessToken  = jwtService.generateAccessToken(principalWithScope);
+            String refreshToken = jwtService.generateRefreshToken(principalWithScope);
+
             return buildLoginResponse(user, accessToken, refreshToken);
+
         } catch (BadCredentialsException e) {
             handleFailedLogin(request.getEmail(), ip);
             throw new BadCredentialsException("Credenciais inválidas");
         } catch (LockedException e) {
             throw e;
         } catch (Exception e) {
-            log.error("Login error", e);
+            log.error("Login error: {} — {}", e.getClass().getName(), e.getMessage(), e);
             throw new BusinessException("Erro ao realizar login");
         }
-    }
-
-    private void handleFailedLogin(String email, String ip) {
-        userRepository.findByEmail(email).ifPresent(user -> {
-            user.incrementFailedAttempts();
-            if (user.getFailedAttempts() >= MAX_FAILED_ATTEMPTS) {
-                user.lockAccount(LocalDateTime.now().plusMinutes(LOCK_DURATION_MINUTES));
-                log.warn("User {} locked for {} minutes", email, LOCK_DURATION_MINUTES);
-            }
-            userRepository.save(user);
-        });
     }
 
     @Transactional
     public RefreshTokenResponse refreshToken(RefreshTokenRequest request) {
         String refreshToken = request.getRefreshToken();
         String username = jwtService.extractUsername(refreshToken);
+
         if (username == null || !jwtService.isRefreshToken(refreshToken)
                 || tokenBlacklistService.isRevoked(jwtService.extractTokenId(refreshToken))) {
             throw new BusinessException("Token inválido");
         }
+
         User user = userRepository.findByEmail(username)
             .orElseThrow(() -> new BusinessException("Usuário não encontrado"));
         if (!user.isActive()) throw new BusinessException("Usuário inativo");
+
         UserPrincipal userPrincipal = new UserPrincipal(user);
-        String newAccessToken = jwtService.generateAccessToken(userPrincipal);
+        String newAccessToken  = jwtService.generateAccessToken(userPrincipal);
         String newRefreshToken = jwtService.generateRefreshToken(userPrincipal);
-        // Rotaciona o refresh token — o antigo é revogado imediatamente
+
         tokenBlacklistService.revoke(
             jwtService.extractTokenId(refreshToken),
             jwtService.getRemainingValidity(refreshToken)
         );
+
         return RefreshTokenResponse.builder()
             .accessToken(newAccessToken)
             .refreshToken(newRefreshToken)
@@ -119,18 +114,12 @@ public class AuthenticationService {
             .build();
     }
 
-    /**
-     * Registra uma nova organização e cria o primeiro usuário ADMIN.
-     * Retorna tokens JWT prontos para uso imediato (auto-login após registro).
-     */
     @Transactional
     public LoginResponse register(RegisterRequest request, String ip) {
         if (userRepository.existsByEmail(request.getEmail())) {
-            throw new BusinessException("Email já cadastrado: " + request.getEmail(),
-                "EMAIL_ALREADY_EXISTS");
+            throw new BusinessException("Email já cadastrado: " + request.getEmail(), "EMAIL_ALREADY_EXISTS");
         }
 
-        // Criar organização
         Organization organization = Organization.builder()
             .name(request.getOrganizationName())
             .email(request.getEmail())
@@ -140,13 +129,11 @@ public class AuthenticationService {
             .plan("FREE")
             .active(true)
             .build();
-        // organization_id auto-referência: temporário até termos o id real
         organization.setOrganizationId(0L);
         organization = organizationRepository.save(organization);
         organization.setOrganizationId(organization.getId());
         organization = organizationRepository.save(organization);
 
-        // Criar usuário ADMIN
         User user = new User();
         user.setName(request.getName());
         user.setEmail(request.getEmail());
@@ -161,9 +148,8 @@ public class AuthenticationService {
         user = userRepository.save(user);
 
         UserPrincipal userPrincipal = new UserPrincipal(user);
-        String accessToken = jwtService.generateAccessToken(userPrincipal);
+        String accessToken  = jwtService.generateAccessToken(userPrincipal);
         String refreshToken = jwtService.generateRefreshToken(userPrincipal);
-
         return buildLoginResponse(user, accessToken, refreshToken);
     }
 
@@ -175,28 +161,44 @@ public class AuthenticationService {
                 jwtService.getRemainingValidity(token)
             );
         } catch (Exception e) {
-            log.debug("Não foi possível revogar token no logout (provavelmente já expirado): {}",
-                e.getMessage());
+            log.debug("Não foi possível revogar token no logout: {}", e.getMessage());
         }
         SecurityContextHolder.clearContext();
     }
 
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    private void handleFailedLogin(String email, String ip) {
+        userRepository.findByEmail(email).ifPresent(user -> {
+            user.incrementFailedAttempts();
+            if (user.getFailedAttempts() >= MAX_FAILED_ATTEMPTS) {
+                user.lockAccount(LocalDateTime.now().plusMinutes(LOCK_DURATION_MINUTES));
+                log.warn("User {} locked for {} minutes", email, LOCK_DURATION_MINUTES);
+            }
+            userRepository.save(user);
+        });
+    }
+
     private LoginResponse buildLoginResponse(User user, String accessToken, String refreshToken) {
         Organization organization = organizationRepository.findById(user.getOrganizationId()).orElse(null);
+
         UserInfoDto userInfo = UserInfoDto.builder()
             .id(user.getId())
             .name(user.getName())
             .email(user.getEmail())
             .organizationId(user.getOrganizationId())
             .organizationName(organization != null ? organization.getName() : null)
+            .churchId(user.getChurchId())
+            .congregationId(user.getCongregationId())
             .roles(user.getRoles().stream()
-                .map(role -> role.getName())
+                .map(r -> r.getName())
                 .collect(Collectors.toSet()))
             .permissions(user.getRoles().stream()
-                .flatMap(role -> role.getPermissions().stream())
-                .map(permission -> permission.getName())
+                .flatMap(r -> r.getPermissions().stream())
+                .map(p -> p.getName())
                 .collect(Collectors.toSet()))
             .build();
+
         return LoginResponse.builder()
             .accessToken(accessToken)
             .refreshToken(refreshToken)

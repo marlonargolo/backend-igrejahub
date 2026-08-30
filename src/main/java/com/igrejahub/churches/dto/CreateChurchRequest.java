@@ -22,4 +22,5 @@ public class CreateChurchRequest {
     private String cnpj;
     private String logoUrl;
     private Long pastorId;
+    private Long planId;
 }

@@ -21,4 +21,5 @@ public class UpdateChurchRequest {
     private String logoUrl;
     private String status;
     private Long pastorId;
+    private Long planId;
 }

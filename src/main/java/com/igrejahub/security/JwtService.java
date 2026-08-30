@@ -26,32 +26,34 @@ public class JwtService {
     private final ApplicationProperties appProperties;
 
     public String generateAccessToken(UserPrincipal user) {
-        Map<String, Object> extraClaims = new HashMap<>();
-        extraClaims.put("userId", user.getId());
-        extraClaims.put("organizationId", user.getOrganizationId());
-        extraClaims.put("email", user.getEmail());
-        return generateToken(user, appProperties.getJwt().getAccessExpiration(), extraClaims);
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("userId",         user.getId());
+        claims.put("organizationId", user.getOrganizationId());
+        claims.put("churchId",       user.getChurchId());        // escopo de Igreja
+        claims.put("congregationId", user.getCongregationId());  // escopo de Congregação
+        claims.put("email",          user.getEmail());
+        return generateToken(user, appProperties.getJwt().getAccessExpiration(), claims);
     }
 
     public String generateRefreshToken(UserPrincipal user) {
-        Map<String, Object> extraClaims = new HashMap<>();
-        extraClaims.put("type", "refresh");
-        extraClaims.put("userId", user.getId());
-        extraClaims.put("organizationId", user.getOrganizationId());
-        extraClaims.put("email", user.getEmail());
-        return generateToken(user, appProperties.getJwt().getRefreshExpiration(), extraClaims);
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("type",           "refresh");
+        claims.put("userId",         user.getId());
+        claims.put("organizationId", user.getOrganizationId());
+        claims.put("churchId",       user.getChurchId());
+        claims.put("congregationId", user.getCongregationId());
+        claims.put("email",          user.getEmail());
+        return generateToken(user, appProperties.getJwt().getRefreshExpiration(), claims);
     }
 
     public String generateToken(UserPrincipal user, long expiration, Map<String, Object> extraClaims) {
         Instant now = Instant.now();
-        Instant expiryDate = now.plusSeconds(expiration);
-
         return Jwts.builder()
             .id(UUID.randomUUID().toString())
             .subject(user.getUsername())
             .claims(extraClaims)
             .issuedAt(Date.from(now))
-            .expiration(Date.from(expiryDate))
+            .expiration(Date.from(now.plusSeconds(expiration)))
             .signWith(getSigningKey())
             .compact();
     }
@@ -64,9 +66,8 @@ public class JwtService {
             .getPayload();
     }
 
-    public <T> T extractClaim(String token, Function<Claims, T> claimsResolver) {
-        final Claims claims = extractAllClaims(token);
-        return claimsResolver.apply(claims);
+    public <T> T extractClaim(String token, Function<Claims, T> resolver) {
+        return resolver.apply(extractAllClaims(token));
     }
 
     public String extractUsername(String token) {
@@ -77,30 +78,37 @@ public class JwtService {
         return extractClaim(token, Claims::getId);
     }
 
-    public Duration getRemainingValidity(String token) {
-        Duration remaining = Duration.between(Instant.now(), extractExpiration(token).toInstant());
-        return remaining.isNegative() ? Duration.ZERO : remaining;
-    }
-
     public Long extractUserId(String token) {
-        return extractClaim(token, claims -> claims.get("userId", Long.class));
+        return extractClaim(token, c -> c.get("userId", Long.class));
     }
 
     public Long extractOrganizationId(String token) {
-        return extractClaim(token, claims -> claims.get("organizationId", Long.class));
+        return extractClaim(token, c -> c.get("organizationId", Long.class));
+    }
+
+    public Long extractChurchId(String token) {
+        return extractClaim(token, c -> c.get("churchId", Long.class));
+    }
+
+    public Long extractCongregationId(String token) {
+        return extractClaim(token, c -> c.get("congregationId", Long.class));
     }
 
     public String extractEmail(String token) {
-        return extractClaim(token, claims -> claims.get("email", String.class));
+        return extractClaim(token, c -> c.get("email", String.class));
     }
 
     public Date extractExpiration(String token) {
         return extractClaim(token, Claims::getExpiration);
     }
 
+    public Duration getRemainingValidity(String token) {
+        Duration remaining = Duration.between(Instant.now(), extractExpiration(token).toInstant());
+        return remaining.isNegative() ? Duration.ZERO : remaining;
+    }
+
     public boolean isTokenValid(String token, UserPrincipal user) {
-        final String username = extractUsername(token);
-        return (username.equals(user.getUsername())) && !isTokenExpired(token);
+        return extractUsername(token).equals(user.getUsername()) && !isTokenExpired(token);
     }
 
     public boolean isTokenExpired(String token) {
@@ -108,13 +116,12 @@ public class JwtService {
     }
 
     public boolean isRefreshToken(String token) {
-        String type = extractClaim(token, claims -> claims.get("type", String.class));
-        return "refresh".equals(type);
+        return "refresh".equals(extractClaim(token, c -> c.get("type", String.class)));
     }
 
     private SecretKey getSigningKey() {
-        String secret = appProperties.getJwt().getSecret();
-        byte[] keyBytes = secret.getBytes(StandardCharsets.UTF_8);
-        return Keys.hmacShaKeyFor(keyBytes);
+        return Keys.hmacShaKeyFor(
+            appProperties.getJwt().getSecret().getBytes(StandardCharsets.UTF_8)
+        );
     }
 }

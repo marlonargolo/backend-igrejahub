@@ -50,6 +50,19 @@ public class User extends BaseEntity {
     @Column(name = "locked_until")
     private LocalDateTime lockedUntil;
 
+    /** Igreja à qual o usuário pertence. Null apenas para ROOT sem Igreja associada. */
+    @Column(name = "church_id")
+    private Long churchId;
+
+    /**
+     * Congregação à qual o usuário pertence (opcional).
+     * Null = acesso à Igreja toda (admin, pastor principal, tesoureiro da sede).
+     * Preenchido = acesso restrito à congregação (pastor_congregacao, membro).
+     * Adicionado na migration V29.
+     */
+    @Column(name = "congregation_id")
+    private Long congregationId;
+
     @ManyToMany(fetch = FetchType.EAGER)
     @JoinTable(
         name = "user_roles",
@@ -59,26 +72,17 @@ public class User extends BaseEntity {
     @Builder.Default
     private Set<Role> roles = new HashSet<>();
 
-    public void incrementFailedAttempts() {
-        this.failedAttempts++;
-    }
+    public void incrementFailedAttempts() { this.failedAttempts++; }
 
     public void resetFailedAttempts() {
         this.failedAttempts = 0;
         this.lockedUntil = null;
     }
 
-    public void lockAccount(LocalDateTime until) {
-        this.lockedUntil = until;
-    }
+    public void lockAccount(LocalDateTime until) { this.lockedUntil = until; }
 
     public boolean isLocked() {
-        if (lockedUntil == null) {
-            return false;
-        }
+        if (lockedUntil == null) return false;
         return lockedUntil.isAfter(LocalDateTime.now());
     }
-
-    @jakarta.persistence.Column(name = "church_id")
-    private Long churchId;
 }
