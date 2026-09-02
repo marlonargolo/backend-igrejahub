@@ -7,6 +7,7 @@ import com.igrejahub.finance.dto.FinancialAccountDto;
 import com.igrejahub.finance.entity.FinancialAccount;
 import com.igrejahub.finance.mapper.FinancialAccountMapper;
 import com.igrejahub.finance.repository.FinancialAccountRepository;
+import com.igrejahub.security.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -16,22 +17,48 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.util.List;
 
+/**
+ * ISOLAMENTO: contas financeiras pertencem a uma Igreja.
+ *   ROOT global   → vê todas as contas da organização
+ *   Demais        → vê apenas contas da sua Igreja
+ */
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class FinancialAccountService {
 
     private final FinancialAccountRepository accountRepository;
-    private final FinancialAccountMapper accountMapper;
+    private final FinancialAccountMapper     accountMapper;
+    private final SecurityUtils              securityUtils;
 
     public Page<FinancialAccountDto> getAccounts(Pageable pageable) {
-        return accountRepository.findByOrganizationId(TenantContext.getCurrentTenant(), pageable)
+        Long orgId    = TenantContext.getCurrentTenant();
+        Long churchId = securityUtils.getEffectiveChurchId();
+
+        // ROOT global → tudo
+        if (securityUtils.canViewAll()) {
+            return accountRepository.findByOrganizationId(orgId, pageable)
                 .map(accountMapper::toDto);
+        }
+
+        // Demais → só da Igreja
+        if (churchId == null) return Page.empty(pageable);
+        return accountRepository.findByOrganizationIdAndChurchId(orgId, churchId, pageable)
+            .map(accountMapper::toDto);
     }
 
     public List<FinancialAccountDto> getActiveAccounts() {
-        return accountRepository.findByOrganizationIdAndActiveTrue(TenantContext.getCurrentTenant())
+        Long orgId    = TenantContext.getCurrentTenant();
+        Long churchId = securityUtils.getEffectiveChurchId();
+
+        if (securityUtils.canViewAll()) {
+            return accountRepository.findByOrganizationIdAndActiveTrue(orgId)
                 .stream().map(accountMapper::toDto).toList();
+        }
+
+        if (churchId == null) return List.of();
+        return accountRepository.findByOrganizationIdAndChurchIdAndActiveTrue(orgId, churchId)
+            .stream().map(accountMapper::toDto).toList();
     }
 
     public FinancialAccountDto getAccount(Long id) {
@@ -42,18 +69,32 @@ public class FinancialAccountService {
     public FinancialAccountDto createAccount(String name, String type, String bankName, String agency,
                                               String accountNumber, BigDecimal initialBalance, Long churchId) {
         Long orgId = TenantContext.getCurrentTenant();
+
+        // Determinar Igreja da conta
+        Long targetChurchId;
+        if (securityUtils.canViewAll()) {
+            // ROOT global: usa o churchId passado (pode ser null só para ROOT)
+            targetChurchId = churchId;
+        } else {
+            // Demais: usa a Igreja do contexto, ignora churchId do request
+            targetChurchId = securityUtils.getEffectiveChurchId();
+            if (targetChurchId == null) {
+                throw new BusinessException("Seu usuário não está vinculado a nenhuma Igreja.");
+            }
+        }
+
         Long initialCents = FinancialAccountMapper.amountToCents(initialBalance);
         FinancialAccount account = FinancialAccount.builder()
-                .churchId(churchId)
-                .name(name)
-                .type(FinancialAccount.AccountType.valueOf(type))
-                .bankName(bankName)
-                .agency(agency)
-                .accountNumber(accountNumber)
-                .initialBalanceCents(initialCents)
-                .currentBalanceCents(initialCents)
-                .active(true)
-                .build();
+            .churchId(targetChurchId)
+            .name(name)
+            .type(FinancialAccount.AccountType.valueOf(type))
+            .bankName(bankName)
+            .agency(agency)
+            .accountNumber(accountNumber)
+            .initialBalanceCents(initialCents)
+            .currentBalanceCents(initialCents)
+            .active(true)
+            .build();
         account.setOrganizationId(orgId);
         return accountMapper.toDto(accountRepository.save(account));
     }
@@ -62,11 +103,11 @@ public class FinancialAccountService {
     public FinancialAccountDto updateAccount(Long id, String name, String bankName, String agency,
                                               String accountNumber, Boolean active) {
         FinancialAccount account = getOwnedAccount(id);
-        if (name != null) account.setName(name);
-        if (bankName != null) account.setBankName(bankName);
-        if (agency != null) account.setAgency(agency);
+        if (name != null)          account.setName(name);
+        if (bankName != null)      account.setBankName(bankName);
+        if (agency != null)        account.setAgency(agency);
         if (accountNumber != null) account.setAccountNumber(accountNumber);
-        if (active != null) account.setActive(active);
+        if (active != null)        account.setActive(active);
         return accountMapper.toDto(accountRepository.save(account));
     }
 
@@ -77,13 +118,11 @@ public class FinancialAccountService {
         accountRepository.save(account);
     }
 
-    /** Usado pelo FinancialTransactionService/TransferService para creditar/debitar saldo. */
     @Transactional
     public void adjustBalance(Long accountId, long deltaCents) {
         accountRepository.adjustBalance(accountId, deltaCents);
     }
 
-    /** Debita atomicamente só se houver saldo suficiente, evitando corrida entre checagem e ajuste. */
     @Transactional
     public void debitIfSufficient(Long accountId, long cents) {
         int updated = accountRepository.debitIfSufficient(accountId, cents);
@@ -94,10 +133,20 @@ public class FinancialAccountService {
 
     FinancialAccount getOwnedAccount(Long id) {
         FinancialAccount account = accountRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("FinancialAccount", id));
+            .orElseThrow(() -> new ResourceNotFoundException("FinancialAccount", id));
+
         if (!account.getOrganizationId().equals(TenantContext.getCurrentTenant())) {
             throw new BusinessException("Acesso não autorizado");
         }
+
+        // Validar isolamento de Igreja para não-ROOT
+        if (!securityUtils.canViewAll()) {
+            Long callerChurchId = securityUtils.getEffectiveChurchId();
+            if (callerChurchId != null && !callerChurchId.equals(account.getChurchId())) {
+                throw new BusinessException("Você não tem acesso a esta conta.");
+            }
+        }
+
         return account;
     }
 }

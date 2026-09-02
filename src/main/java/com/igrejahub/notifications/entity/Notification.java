@@ -8,12 +8,16 @@ import java.time.LocalDateTime;
 @Table(name = "notifications")
 @Data @Builder @NoArgsConstructor @AllArgsConstructor
 public class Notification {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @Column(name = "organization_id", nullable = false)
     private Long organizationId;
+
+    @Column(name = "church_id")
+    private Long churchId;
 
     @Column(name = "user_id", nullable = false)
     private Long userId;

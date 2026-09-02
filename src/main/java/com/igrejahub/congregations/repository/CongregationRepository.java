@@ -13,14 +13,14 @@ import java.util.Optional;
 @Repository
 public interface CongregationRepository extends BaseRepository<Congregation, Long> {
 
-    // ─── Existentes — não remover ─────────────────────────────────────────────
+    // ── Existentes — não remover ──────────────────────────────────────────────
     Page<Congregation> findByOrganizationId(Long orgId, Pageable pageable);
     Optional<Congregation> findByOrganizationIdAndId(Long orgId, Long id);
     Page<Congregation> findByOrganizationIdAndChurchId(Long orgId, Long churchId, Pageable pageable);
     Page<Congregation> findByOrganizationIdAndNameContainingIgnoreCase(Long orgId, String name, Pageable pageable);
     long countByOrganizationIdAndStatus(Long orgId, String status);
 
-    // ─── Novos: escopo por Igreja ─────────────────────────────────────────────
+    // ── Adicionados para isolamento ───────────────────────────────────────────
     @Query("SELECT c FROM Congregation c WHERE c.organizationId = :orgId AND c.churchId = :churchId " +
            "AND c.deleted = false AND LOWER(c.name) LIKE LOWER(CONCAT('%',:name,'%'))")
     Page<Congregation> findByOrganizationIdAndChurchIdAndNameContainingIgnoreCase(
@@ -30,4 +30,12 @@ public interface CongregationRepository extends BaseRepository<Congregation, Lon
         Pageable pageable);
 
     long countByChurchId(Long churchId);
+
+    // ── Validação: congregação pertence à igreja (usada na criação de membros) ─
+    @Query("SELECT COUNT(c) > 0 FROM Congregation c WHERE c.organizationId = :orgId " +
+           "AND c.id = :congregationId AND c.churchId = :churchId AND c.deleted = false")
+    boolean existsByOrganizationIdAndIdAndChurchId(
+        @Param("orgId") Long orgId,
+        @Param("congregationId") Long congregationId,
+        @Param("churchId") Long churchId);
 }

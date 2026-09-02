@@ -46,11 +46,12 @@ public class MemberController {
     @PreAuthorize("hasPermission(null, 'MEMBER_VIEW')")
     public ResponseEntity<ApiResponse<PaginatedResponse<MemberDto>>> getMembers(
             @PageableDefault(size = 20, sort = "name", direction = Sort.Direction.ASC) Pageable pageable,
+            @RequestParam(required = false) Long churchId,
             @RequestParam(required = false) Long congregationId,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String search) {
 
-        Page<MemberDto> page = memberService.getMembers(pageable, null, congregationId, status, search);
+        Page<MemberDto> page = memberService.getMembers(pageable, churchId, congregationId, status, search);
 
         PaginatedResponse<MemberDto> response = PaginatedResponse.<MemberDto>builder()
             .data(page.getContent())

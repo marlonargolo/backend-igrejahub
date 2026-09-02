@@ -10,6 +10,7 @@ import com.igrejahub.members.dto.MemberDto;
 import com.igrejahub.members.dto.UpdateMemberRequest;
 import com.igrejahub.members.entity.Member;
 import com.igrejahub.members.repository.MemberRepository;
+import com.igrejahub.security.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -25,14 +26,37 @@ import java.time.LocalDate;
 @Transactional(readOnly = true)
 public class MemberService {
 
-    private final MemberRepository memberRepository;
-    private final ChurchRepository churchRepository;
+    private final MemberRepository       memberRepository;
+    private final ChurchRepository       churchRepository;
     private final CongregationRepository congregationRepository;
+    private final SecurityUtils          securityUtils;
 
-    public Page<MemberDto> getMembers(Pageable pageable, Long churchId, Long congregationId, String status, String search) {
-        Long organizationId = TenantContext.getCurrentTenant();
-        String normalizedSearch = search != null && !search.isEmpty() ? search : null;
-        return memberRepository.search(organizationId, churchId, congregationId, status, normalizedSearch, pageable)
+    public Page<MemberDto> getMembers(Pageable pageable, Long churchIdParam,
+                                      Long congregationId, String status, String search) {
+        Long orgId  = TenantContext.getCurrentTenant();
+        String s    = search != null && !search.isEmpty() ? search : null;
+        Long effChurchId    = securityUtils.getEffectiveChurchId();
+        Long effCongId      = TenantContext.getCurrentCongregationId();
+
+        log.debug("getMembers orgId={} effChurchId={} effCongId={} canViewAll={}",
+            orgId, effChurchId, effCongId, securityUtils.canViewAll());
+
+        // ROOT modo global → todos da organização
+        if (securityUtils.canViewAll()) {
+            return memberRepository.findAllByOrganization(orgId, status, s, pageable)
+                .map(this::toDto);
+        }
+
+        // Pastor de Congregação → só da sua congregação
+        if (effCongId != null && !securityUtils.isRoot()) {
+            return memberRepository.findByCongregationId(orgId, effCongId, status, s, pageable)
+                .map(this::toDto);
+        }
+
+        // Admin/Pastor da Igreja ou ROOT com contexto → filtra por churchId
+        if (effChurchId == null) return Page.empty(pageable);
+
+        return memberRepository.findByChurchId(orgId, effChurchId, congregationId, status, s, pageable)
             .map(this::toDto);
     }
 
@@ -43,6 +67,13 @@ public class MemberService {
         if (!member.getOrganizationId().equals(organizationId)) {
             throw new BusinessException("Acesso não autorizado");
         }
+        // Validar isolamento
+        if (!securityUtils.canViewAll()) {
+            Long eff = securityUtils.getEffectiveChurchId();
+            if (eff != null && !eff.equals(member.getChurchId())) {
+                throw new BusinessException("Você não tem acesso a este membro.");
+            }
+        }
         return toDto(member);
     }
 
@@ -50,19 +81,44 @@ public class MemberService {
     public MemberDto createMember(CreateMemberRequest request) {
         Long organizationId = TenantContext.getCurrentTenant();
 
-        if (request.getChurchId() != null
-                && !churchRepository.existsByOrganizationIdAndId(organizationId, request.getChurchId())) {
-            throw new BusinessException("Igreja não encontrada ou não pertence à sua organização");
+        // Determinar Igreja alvo
+        Long targetChurchId;
+        if (securityUtils.canViewAll()) {
+            targetChurchId = request.getChurchId();
+            if (targetChurchId == null) {
+                throw new BusinessException("Selecione a Igreja para o novo membro.");
+            }
+        } else {
+            Long effChurchId = securityUtils.getEffectiveChurchId();
+            if (effChurchId == null) {
+                throw new BusinessException("Seu usuário não está vinculado a nenhuma Igreja.");
+            }
+            // Não pode criar em outra Igreja
+            if (request.getChurchId() != null && !request.getChurchId().equals(effChurchId)) {
+                throw new BusinessException("Você não pode criar membros em outra Igreja.");
+            }
+            targetChurchId = effChurchId;
         }
-        if (request.getCongregationId() != null
-                && congregationRepository.findByOrganizationIdAndId(organizationId, request.getCongregationId()).isEmpty()) {
-            throw new BusinessException("Congregação não encontrada ou não pertence à sua organização");
+
+        if (!churchRepository.existsByOrganizationIdAndId(organizationId, targetChurchId)) {
+            throw new BusinessException("Igreja não encontrada ou não pertence à sua organização.");
+        }
+
+        // Congregação deve pertencer à Igreja
+        Long targetCongId = request.getCongregationId();
+        Long effCongId    = TenantContext.getCurrentCongregationId();
+        if (effCongId != null && !securityUtils.isRoot()) {
+            // Pastor de Congregação: forçar para a sua congregação
+            targetCongId = effCongId;
+        } else if (targetCongId != null
+                && congregationRepository.findByOrganizationIdAndId(organizationId, targetCongId).isEmpty()) {
+            throw new BusinessException("Congregação não encontrada ou não pertence à sua organização.");
         }
 
         Member member = new Member();
         member.setOrganizationId(organizationId);
-        member.setChurchId(request.getChurchId());
-        member.setCongregationId(request.getCongregationId());
+        member.setChurchId(targetChurchId);
+        member.setCongregationId(targetCongId);
         member.setName(request.getName());
         member.setEmail(request.getEmail());
         member.setPhone(request.getPhone());
@@ -78,10 +134,13 @@ public class MemberService {
         member.setNotes(request.getNotes());
         member.setCargo(request.getCargo());
         member.setFuncoes(request.getFuncoes());
-        member.setRole(request.getCargo()); // compatibilidade
+        member.setRole(request.getCargo());
         member.setStatus("ACTIVE");
 
         member = memberRepository.save(member);
+        log.info("Member created: {} churchId={} congregationId={} by={}",
+            member.getName(), member.getChurchId(), member.getCongregationId(),
+            TenantContext.getCurrentUserId());
         return toDto(member);
     }
 
@@ -94,23 +153,23 @@ public class MemberService {
             throw new BusinessException("Acesso não autorizado");
         }
 
-        if (request.getName() != null) member.setName(request.getName());
-        if (request.getEmail() != null) member.setEmail(request.getEmail());
-        if (request.getPhone() != null) member.setPhone(request.getPhone());
-        if (request.getRg() != null) member.setRg(request.getRg());
-        if (request.getCpf() != null) member.setCpf(request.getCpf());
-        if (request.getBirthDate() != null) member.setBirthDate(request.getBirthDate());
-        if (request.getGender() != null) member.setGender(request.getGender());
+        if (request.getName()          != null) member.setName(request.getName());
+        if (request.getEmail()         != null) member.setEmail(request.getEmail());
+        if (request.getPhone()         != null) member.setPhone(request.getPhone());
+        if (request.getRg()            != null) member.setRg(request.getRg());
+        if (request.getCpf()           != null) member.setCpf(request.getCpf());
+        if (request.getBirthDate()     != null) member.setBirthDate(request.getBirthDate());
+        if (request.getGender()        != null) member.setGender(request.getGender());
         if (request.getMaritalStatus() != null) member.setMaritalStatus(request.getMaritalStatus());
-        if (request.getProfession() != null) member.setProfession(request.getProfession());
-        if (request.getAddress() != null) member.setAddress(request.getAddress());
-        if (request.getNotes() != null) member.setNotes(request.getNotes());
-        if (request.getCargo() != null) { member.setCargo(request.getCargo()); member.setRole(request.getCargo()); }
-        if (request.getFuncoes() != null) member.setFuncoes(request.getFuncoes());
-        if (request.getStatus() != null) member.setStatus(request.getStatus());
+        if (request.getProfession()    != null) member.setProfession(request.getProfession());
+        if (request.getAddress()       != null) member.setAddress(request.getAddress());
+        if (request.getNotes()         != null) member.setNotes(request.getNotes());
+        if (request.getCargo()         != null) { member.setCargo(request.getCargo()); member.setRole(request.getCargo()); }
+        if (request.getFuncoes()       != null) member.setFuncoes(request.getFuncoes());
+        if (request.getStatus()        != null) member.setStatus(request.getStatus());
+        if (request.getCongregationId() != null) member.setCongregationId(request.getCongregationId());
 
-        member = memberRepository.save(member);
-        return toDto(member);
+        return toDto(memberRepository.save(member));
     }
 
     @Transactional
@@ -155,7 +214,7 @@ public class MemberService {
     @Transactional
     public void updateAvatar(Long id, String avatarUrl) {
         Member member = memberRepository.findById(id)
-            .orElseThrow(() -> new com.igrejahub.common.exception.ResourceNotFoundException("Member", id));
+            .orElseThrow(() -> new ResourceNotFoundException("Member", id));
         member.setAvatarUrl(avatarUrl);
         memberRepository.save(member);
     }

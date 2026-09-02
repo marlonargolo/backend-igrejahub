@@ -13,7 +13,7 @@ import java.util.Optional;
 @Repository
 public interface UserRepository extends BaseRepository<User, Long> {
 
-    // ── Existentes — não remover ──────────────────────────────────────────────
+    // ── Existentes ────────────────────────────────────────────────────────────
     Optional<User> findByEmail(String email);
     Optional<User> findByOrganizationIdAndId(Long organizationId, Long id);
     Page<User> findByOrganizationId(Long organizationId, Pageable pageable);
@@ -23,8 +23,7 @@ public interface UserRepository extends BaseRepository<User, Long> {
     long countByOrganizationIdAndActive(Long organizationId, boolean active);
 
     // ── Por Igreja ────────────────────────────────────────────────────────────
-    Page<User> findByOrganizationIdAndChurchId(
-        Long organizationId, Long churchId, Pageable pageable);
+    Page<User> findByOrganizationIdAndChurchId(Long organizationId, Long churchId, Pageable pageable);
 
     @Query("SELECT u FROM User u WHERE u.organizationId = :orgId AND u.churchId = :churchId " +
            "AND u.deleted = false AND " +
@@ -37,4 +36,18 @@ public interface UserRepository extends BaseRepository<User, Long> {
         Pageable pageable);
 
     long countByChurchId(Long churchId);
+
+    // ── Por Congregação ───────────────────────────────────────────────────────
+    Page<User> findByOrganizationIdAndCongregationId(
+        Long organizationId, Long congregationId, Pageable pageable);
+
+    @Query("SELECT u FROM User u WHERE u.organizationId = :orgId AND u.congregationId = :congId " +
+           "AND u.deleted = false AND " +
+           "(LOWER(u.name) LIKE LOWER(CONCAT('%',:s,'%')) " +
+           "OR LOWER(u.email) LIKE LOWER(CONCAT('%',:s,'%')))")
+    Page<User> findByOrganizationIdAndCongregationIdAndSearch(
+        @Param("orgId") Long organizationId,
+        @Param("congId") Long congregationId,
+        @Param("s") String search,
+        Pageable pageable);
 }

@@ -28,4 +28,11 @@ public class UpdateMemberRequest {
     private String funcoes;
     private String role;
     private String status;
+
+    /**
+     * Permite mover o membro para outra congregação da mesma Igreja.
+     * O MemberService valida que a congregação pertence à Igreja do membro.
+     * Null = sem alteração de congregação.
+     */
+    private Long congregationId;
 }

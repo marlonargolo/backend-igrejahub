@@ -14,6 +14,7 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class SupportTicket {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -26,6 +27,9 @@ public class SupportTicket {
 
     @Column(name = "church_id")
     private Long churchId;
+
+    @Column(name = "congregation_id")
+    private Long congregationId;
 
     @Column(name = "title", nullable = false)
     private String title;
@@ -40,6 +44,10 @@ public class SupportTicket {
     @Column(name = "status", nullable = false)
     @Builder.Default
     private String status = "ABERTO";
+
+    @Column(name = "deleted")
+    @Builder.Default
+    private Boolean deleted = false;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;

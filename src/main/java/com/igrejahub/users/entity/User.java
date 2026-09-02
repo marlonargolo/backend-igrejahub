@@ -50,12 +50,12 @@ public class User extends BaseEntity {
     @Column(name = "locked_until")
     private LocalDateTime lockedUntil;
 
-    /** Igreja à qual o usuário pertence. Null apenas para ROOT sem Igreja associada. */
+    /** Igreja do usuário. Null apenas para ROOT (acesso a toda a organização). */
     @Column(name = "church_id")
     private Long churchId;
 
     /**
-     * Congregação à qual o usuário pertence (opcional).
+     * Congregação do usuário (opcional).
      * Null = acesso à Igreja toda (admin, pastor principal, tesoureiro da sede).
      * Preenchido = acesso restrito à congregação (pastor_congregacao, membro).
      * Adicionado na migration V29.

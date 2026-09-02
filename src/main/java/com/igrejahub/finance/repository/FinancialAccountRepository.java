@@ -8,10 +8,13 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+
 import java.util.List;
 
 @Repository
 public interface FinancialAccountRepository extends BaseRepository<FinancialAccount, Long> {
+
+    // ── Existentes — não remover ──────────────────────────────────────────────
     Page<FinancialAccount> findByOrganizationId(Long organizationId, Pageable pageable);
     List<FinancialAccount> findByOrganizationIdAndActiveTrue(Long organizationId);
 
@@ -24,4 +27,14 @@ public interface FinancialAccountRepository extends BaseRepository<FinancialAcco
     @Query("UPDATE FinancialAccount a SET a.currentBalanceCents = a.currentBalanceCents - :cents " +
            "WHERE a.id = :accountId AND a.currentBalanceCents >= :cents")
     int debitIfSufficient(@Param("accountId") Long accountId, @Param("cents") Long cents);
+
+    // ── Novos: filtro por Igreja ───────────────────────────────────────────────
+
+    /** Contas ativas de uma Igreja específica */
+    List<FinancialAccount> findByOrganizationIdAndChurchIdAndActiveTrue(
+        Long organizationId, Long churchId);
+
+    /** Todas as contas de uma Igreja (para admin) */
+    Page<FinancialAccount> findByOrganizationIdAndChurchId(
+        Long organizationId, Long churchId, Pageable pageable);
 }

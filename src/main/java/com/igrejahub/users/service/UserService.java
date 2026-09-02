@@ -26,26 +26,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/**
- * REGRAS DE NEGÓCIO:
- *
- * LISTAGEM:
- *   ROOT  → todos da organização
- *   Outros → apenas usuários da mesma Igreja (churchId do TenantContext)
- *
- * CRIAÇÃO:
- *   ROOT               → escolhe churchId livremente
- *   Não-ROOT com USER_CREATE → churchId herdado do criador; congregationId herdado se for scoped
- *   Roles atribuíveis  → apenas roles cujas permissões são subconjunto das permissões do criador
- *                        (usuário criado nunca pode ter mais poder que o criador)
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class UserService {
 
-    // Permissões que NUNCA podem ser delegadas a um usuário criado por não-ROOT
     private static final Set<String> NEVER_DELEGATABLE = Set.of(
         "ROOT_ACCESS", "PLAN_MANAGE", "CHURCH_MANAGE",
         "BILLING_MANAGE", "BILLING_VIEW", "ACCOUNTING_ADMIN", "AUDIT_VIEW"
@@ -61,38 +47,43 @@ public class UserService {
     // ── Listagem ──────────────────────────────────────────────────────────────
 
     public Page<UserDto> getUsers(Pageable pageable, String search) {
-        Long orgId = TenantContext.getCurrentTenant();
+        Long orgId            = TenantContext.getCurrentTenant();
+        Long effectiveChurchId = securityUtils.getEffectiveChurchId();
 
-        // ROOT vê todos
-        if (securityUtils.isRoot()) {
+        // ROOT modo global → todos da organização
+        if (securityUtils.canViewAll()) {
             return search != null && !search.isEmpty()
                 ? userRepository.findByOrganizationIdAndNameContainingIgnoreCaseOrEmailContainingIgnoreCase(
                     orgId, search, search, pageable).map(userMapper::toDto)
                 : userRepository.findByOrganizationId(orgId, pageable).map(userMapper::toDto);
         }
 
-        // Demais: apenas da mesma Igreja
-        Long churchId = TenantContext.getCurrentChurchId();
-        if (churchId == null) return Page.empty(pageable);
+        // Qualquer outro (incluindo ROOT com Igreja selecionada) → filtra por church_id
+        if (effectiveChurchId == null) return Page.empty(pageable);
+
+        Long userCongId = TenantContext.getCurrentCongregationId();
+        if (userCongId != null && !securityUtils.isRoot()) {
+            // PASTOR_CONGREGACAO → só usuários da sua congregação
+            return search != null && !search.isEmpty()
+                ? userRepository.findByOrganizationIdAndCongregationIdAndSearch(
+                    orgId, userCongId, search, pageable).map(userMapper::toDto)
+                : userRepository.findByOrganizationIdAndCongregationId(
+                    orgId, userCongId, pageable).map(userMapper::toDto);
+        }
 
         return search != null && !search.isEmpty()
             ? userRepository.findByOrganizationIdAndChurchIdAndSearch(
-                orgId, churchId, search, pageable).map(userMapper::toDto)
+                orgId, effectiveChurchId, search, pageable).map(userMapper::toDto)
             : userRepository.findByOrganizationIdAndChurchId(
-                orgId, churchId, pageable).map(userMapper::toDto);
+                orgId, effectiveChurchId, pageable).map(userMapper::toDto);
     }
 
     public UserDto getUser(Long id) {
         Long orgId = TenantContext.getCurrentTenant();
         User user = userRepository.findByOrganizationIdAndId(orgId, id)
             .orElseThrow(() -> new ResourceNotFoundException("User", id));
-
-        // Não-ROOT só vê usuários da mesma Igreja
-        if (!securityUtils.isRoot()) {
-            Long myChurch = TenantContext.getCurrentChurchId();
-            if (myChurch != null && !myChurch.equals(user.getChurchId())) {
-                throw new BusinessException("Acesso não autorizado a este usuário.");
-            }
+        if (!securityUtils.canViewAll()) {
+            assertSameChurch(user);
         }
         return userMapper.toDto(user);
     }
@@ -116,61 +107,54 @@ public class UserService {
         user.setActive(request.getActive() != null ? request.getActive() : true);
         user.setVerified(false);
 
-        if (securityUtils.isRoot()) {
-            // ROOT: usa churchId do request (pode ser null)
-            user.setChurchId(request.getChurchId());
-            user.setCongregationId(null);
+        Long effectiveChurchId;
+        if (securityUtils.isRoot() && securityUtils.canViewAll()) {
+            // ROOT modo global: precisa informar a Igreja explicitamente
+            if (request.getChurchId() == null) {
+                throw new BusinessException("Selecione a Igreja para o novo usuário.");
+            }
+            effectiveChurchId = request.getChurchId();
         } else {
-            // Não-ROOT: churchId e congregationId herdados do criador
-            Long callerChurchId = TenantContext.getCurrentChurchId();
-            Long callerCongId   = TenantContext.getCurrentCongregationId();
-
-            if (callerChurchId == null) {
+            // ROOT com Igreja ou não-ROOT: usa o churchId do contexto
+            effectiveChurchId = securityUtils.getEffectiveChurchId();
+            if (effectiveChurchId == null) {
                 throw new BusinessException("Seu usuário não está vinculado a nenhuma Igreja.");
             }
+            assertUserQuota(effectiveChurchId);
+        }
+        user.setChurchId(effectiveChurchId);
 
-            // Quota do plano
-            assertUserQuota(callerChurchId);
-
-            user.setChurchId(callerChurchId);
-            // Se criador está scoped a uma congregação, novo usuário herda
-            if (callerCongId != null) {
-                user.setCongregationId(callerCongId);
-            }
+        // Não-ROOT scoped a congregação: novo usuário herda congregação
+        if (!securityUtils.isRoot()) {
+            Long callerCongId = TenantContext.getCurrentCongregationId();
+            if (callerCongId != null) user.setCongregationId(callerCongId);
         }
 
-        // Atribuir role — validando que o criador não delega mais poder do que tem
         assignRole(user, request.getRoleIds(), request.getRoleName());
-
         user = userRepository.save(user);
 
-        // Registrar vínculos de acesso
-        if (user.getChurchId() != null) {
-            jdbcTemplate.update(
-                "INSERT INTO user_church_access(user_id,church_id) VALUES(?,?) ON CONFLICT DO NOTHING",
-                user.getId(), user.getChurchId());
-        }
+        jdbcTemplate.update(
+            "INSERT INTO user_church_access(user_id,church_id) VALUES(?,?) ON CONFLICT DO NOTHING",
+            user.getId(), user.getChurchId());
         if (user.getCongregationId() != null) {
             jdbcTemplate.update(
                 "INSERT INTO user_congregation_access(user_id,congregation_id) VALUES(?,?) ON CONFLICT DO NOTHING",
                 user.getId(), user.getCongregationId());
         }
 
-        log.info("User created: {} churchId={} by userId={}",
-            user.getEmail(), user.getChurchId(), TenantContext.getCurrentUserId());
-
+        log.info("User created: {} church={} by={}", user.getEmail(), user.getChurchId(),
+            TenantContext.getCurrentUserId());
         return userMapper.toDto(user);
     }
 
-    // ── Update / Disable / Enable ─────────────────────────────────────────────
+    // ── Update / Delete ───────────────────────────────────────────────────────
 
     @Transactional
     public UserDto updateUser(Long id, UpdateUserRequest request) {
         Long orgId = TenantContext.getCurrentTenant();
         User user = userRepository.findByOrganizationIdAndId(orgId, id)
             .orElseThrow(() -> new ResourceNotFoundException("User", id));
-
-        assertSameChurch(user);
+        if (!securityUtils.canViewAll()) assertSameChurch(user);
 
         if (request.getName()   != null) user.setName(request.getName());
         if (request.getPhone()  != null) user.setPhone(request.getPhone());
@@ -185,7 +169,6 @@ public class UserService {
                 });
             }
         }
-
         return userMapper.toDto(userRepository.save(user));
     }
 
@@ -194,7 +177,7 @@ public class UserService {
         Long orgId = TenantContext.getCurrentTenant();
         User user = userRepository.findByOrganizationIdAndId(orgId, id)
             .orElseThrow(() -> new ResourceNotFoundException("User", id));
-        assertSameChurch(user);
+        if (!securityUtils.canViewAll()) assertSameChurch(user);
         user.setActive(false);
         userRepository.save(user);
     }
@@ -204,8 +187,18 @@ public class UserService {
         Long orgId = TenantContext.getCurrentTenant();
         User user = userRepository.findByOrganizationIdAndId(orgId, id)
             .orElseThrow(() -> new ResourceNotFoundException("User", id));
-        assertSameChurch(user);
+        if (!securityUtils.canViewAll()) assertSameChurch(user);
         user.setActive(true);
+        userRepository.save(user);
+    }
+
+    @Transactional
+    public void deleteUser(Long id) {
+        Long orgId = TenantContext.getCurrentTenant();
+        User user = userRepository.findByOrganizationIdAndId(orgId, id)
+            .orElseThrow(() -> new ResourceNotFoundException("User", id));
+        if (!securityUtils.canViewAll()) assertSameChurch(user);
+        user.softDelete(securityUtils.getCurrentUserId());
         userRepository.save(user);
     }
 
@@ -221,7 +214,7 @@ public class UserService {
         userRepository.save(user);
     }
 
-    // ── Vínculos Igreja / Congregação ─────────────────────────────────────────
+    // ── Vínculos ──────────────────────────────────────────────────────────────
 
     public List<Map<String, Object>> getUserChurches(Long userId) {
         return jdbcTemplate.queryForList(
@@ -260,74 +253,47 @@ public class UserService {
         }
     }
 
-    // ── Helpers privados ──────────────────────────────────────────────────────
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
-    /**
-     * Atribui role ao usuário novo, validando que o criador não delega
-     * mais permissões do que possui.
-     */
     private void assignRole(User user, Set<Long> roleIds, String roleName) {
         Role role = null;
-
         if (roleIds != null && !roleIds.isEmpty()) {
             role = roleRepository.findById(roleIds.iterator().next()).orElse(null);
         } else if (roleName != null && !roleName.isBlank()) {
             role = roleRepository.findByName(roleName.toUpperCase()).orElse(null);
         }
-
         if (role == null) return;
-
         assertRoleDelegatable(role);
         user.getRoles().add(role);
     }
 
-    /**
-     * Garante que a role pode ser delegada pelo criador.
-     *
-     * Regras:
-     * 1. ROOT nunca pode ser delegado
-     * 2. Não-ROOT não pode delegar permissões que não possui
-     * 3. Permissões em NEVER_DELEGATABLE são sempre bloqueadas para não-ROOT
-     */
     private void assertRoleDelegatable(Role role) {
-        if (securityUtils.isRoot()) return; // ROOT pode tudo
-
+        if (securityUtils.isRoot()) return;
         if ("ROOT".equals(role.getName())) {
             throw new BusinessException("A role ROOT não pode ser atribuída.");
         }
-
-        // Permissões da role que está sendo atribuída
         Set<String> rolePerms = role.getPermissions().stream()
-            .map(p -> p.getName())
-            .collect(java.util.stream.Collectors.toSet());
-
-        // Verificar NEVER_DELEGATABLE
-        for (String perm : rolePerms) {
-            if (NEVER_DELEGATABLE.contains(perm)) {
+            .map(p -> p.getName()).collect(java.util.stream.Collectors.toSet());
+        for (String p : rolePerms) {
+            if (NEVER_DELEGATABLE.contains(p)) {
                 throw new BusinessException(
                     "A role '" + role.getName() + "' contém permissões de sistema que não podem ser delegadas.");
             }
         }
-
-        // Permissões do criador (role + individuais)
         Set<String> callerPerms = securityUtils.getCurrentUser()
-            .map(u -> u.getPermissions())
-            .orElse(Set.of());
-
-        // O criador não pode dar permissões que não tem
-        for (String perm : rolePerms) {
-            if (!callerPerms.contains(perm)) {
+            .map(u -> u.getPermissions()).orElse(Set.of());
+        for (String p : rolePerms) {
+            if (!callerPerms.contains(p)) {
                 throw new BusinessException(
                     "Você não pode atribuir a role '" + role.getName() +
-                    "' pois ela contém a permissão '" + perm + "' que você não possui.");
+                    "' pois ela contém a permissão '" + p + "' que você não possui.");
             }
         }
     }
 
-    private void assertSameChurch(User targetUser) {
-        if (securityUtils.isRoot()) return;
-        Long callerChurchId = TenantContext.getCurrentChurchId();
-        if (callerChurchId != null && !callerChurchId.equals(targetUser.getChurchId())) {
+    private void assertSameChurch(User target) {
+        Long callerChurchId = securityUtils.getEffectiveChurchId();
+        if (callerChurchId != null && !callerChurchId.equals(target.getChurchId())) {
             throw new BusinessException("Você não tem permissão para gerenciar este usuário.");
         }
     }

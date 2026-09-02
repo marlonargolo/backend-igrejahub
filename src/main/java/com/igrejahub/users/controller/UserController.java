@@ -31,7 +31,7 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/users")
-@Tag(name = "Users", description = "Endpoints de usuários")
+@Tag(name = "Users")
 @RequiredArgsConstructor
 @SecurityRequirement(name = "BearerAuth")
 public class UserController {
@@ -41,13 +41,12 @@ public class UserController {
     private final JdbcTemplate jdbcTemplate;
     private final SecurityUtils securityUtils;
 
-    // Permissões que nunca são delegáveis individualmente (apenas via role ROOT)
     private static final Set<String> BLOCKED_INDIVIDUAL = Set.of(
         "ROOT_ACCESS", "BILLING_MANAGE", "BILLING_VIEW",
         "ACCOUNTING_ADMIN", "AUDIT_VIEW"
     );
 
-    // ─── CRUD Usuários ────────────────────────────────────────────────────────
+    // ── CRUD ──────────────────────────────────────────────────────────────────
 
     @GetMapping
     @PreAuthorize("hasPermission(null, 'USER_VIEW')")
@@ -96,13 +95,24 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success());
     }
 
+    /**
+     * Exclusão permanente (soft delete — some da listagem imediatamente).
+     * Requer USER_DISABLE ou ROOT_ACCESS.
+     */
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasPermission(null, 'USER_DISABLE')")
+    public ResponseEntity<ApiResponse<Void>> deleteUser(@PathVariable Long id) {
+        userService.deleteUser(id);
+        return ResponseEntity.ok(ApiResponse.success());
+    }
+
     @PostMapping("/change-password")
     public ResponseEntity<ApiResponse<Void>> changePassword(@Valid @RequestBody ChangePasswordRequest request) {
         userService.changePassword(request);
         return ResponseEntity.ok(ApiResponse.success());
     }
 
-    // ─── Vínculos Igreja / Congregação ────────────────────────────────────────
+    // ── Vínculos ──────────────────────────────────────────────────────────────
 
     @GetMapping("/{id}/churches")
     public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getUserChurches(@PathVariable Long id) {
@@ -128,18 +138,12 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success());
     }
 
-    // ─── Permissões individuais ───────────────────────────────────────────────
+    // ── Permissões individuais ────────────────────────────────────────────────
 
-    /**
-     * Permissões disponíveis para atribuição individual a um usuário.
-     * Exclui ROOT_ACCESS e permissões de sistema para não-ROOT.
-     * Agrupa por módulo para a UI.
-     */
     @GetMapping("/permissions/available")
     @PreAuthorize("hasPermission(null, 'USER_ROLE_MANAGE')")
     public ResponseEntity<ApiResponse<List<PermissionDto>>> getAvailablePermissions() {
         boolean isRoot = securityUtils.isRoot();
-
         List<PermissionDto> list = permissionRepository.findByActiveTrue().stream()
             .filter(p -> {
                 if ("ROOT_ACCESS".equals(p.getName())) return false;
@@ -152,65 +156,42 @@ public class UserController {
                 .id(p.getId()).name(p.getName())
                 .description(p.getDescription())
                 .category(p.getCategory())
-                .active(p.isActive()).system(p.isSystem())
-                .build())
+                .active(p.isActive()).system(p.isSystem()).build())
             .sorted((a, b) -> {
-                // Ordenar por categoria e depois por nome
-                int cat = (a.getCategory() == null ? "" : a.getCategory())
+                int c = (a.getCategory() == null ? "" : a.getCategory())
                     .compareTo(b.getCategory() == null ? "" : b.getCategory());
-                return cat != 0 ? cat : a.getName().compareTo(b.getName());
+                return c != 0 ? c : a.getName().compareTo(b.getName());
             })
             .collect(Collectors.toList());
-
         return ResponseEntity.ok(ApiResponse.success(list));
     }
 
-    /**
-     * Permissões individuais atribuídas a um usuário específico.
-     */
     @GetMapping("/{id}/permissions")
     @PreAuthorize("hasPermission(null, 'USER_ROLE_MANAGE')")
     public ResponseEntity<ApiResponse<List<String>>> getUserPermissions(@PathVariable Long id) {
         List<String> perms = jdbcTemplate.queryForList(
             "SELECT p.name FROM permissions p " +
-            "JOIN user_permissions up ON p.id = up.permission_id " +
-            "WHERE up.user_id = ?",
-            String.class, id
-        );
+            "JOIN user_permissions up ON p.id = up.permission_id WHERE up.user_id = ?",
+            String.class, id);
         return ResponseEntity.ok(ApiResponse.success(perms));
     }
 
-    /**
-     * Salva permissões individuais de um usuário.
-     * Substitui tudo — o frontend envia o conjunto completo desejado.
-     */
     @PutMapping("/{id}/permissions")
     @PreAuthorize("hasPermission(null, 'USER_ROLE_MANAGE')")
     public ResponseEntity<ApiResponse<Void>> setUserPermissions(
-            @PathVariable Long id,
-            @RequestBody Set<String> permissionNames) {
-
+            @PathVariable Long id, @RequestBody Set<String> permissionNames) {
         Long grantedBy = securityUtils.getCurrentUserId();
         boolean isRoot = securityUtils.isRoot();
-
-        // Filtrar permissões bloqueadas para não-ROOT
         Set<String> toGrant = permissionNames.stream()
-            .filter(name -> isRoot || !BLOCKED_INDIVIDUAL.contains(name))
+            .filter(n -> isRoot || !BLOCKED_INDIVIDUAL.contains(n))
             .collect(Collectors.toSet());
-
-        // Substituir tudo
         jdbcTemplate.update("DELETE FROM user_permissions WHERE user_id = ?", id);
-
-        for (String permName : toGrant) {
-            permissionRepository.findByName(permName).ifPresent(perm ->
+        for (String name : toGrant) {
+            permissionRepository.findByName(name).ifPresent(p ->
                 jdbcTemplate.update(
-                    "INSERT INTO user_permissions(user_id, permission_id, granted_by) " +
-                    "VALUES(?,?,?) ON CONFLICT DO NOTHING",
-                    id, perm.getId(), grantedBy
-                )
-            );
+                    "INSERT INTO user_permissions(user_id,permission_id,granted_by) VALUES(?,?,?) ON CONFLICT DO NOTHING",
+                    id, p.getId(), grantedBy));
         }
-
         return ResponseEntity.ok(ApiResponse.success());
     }
 }
