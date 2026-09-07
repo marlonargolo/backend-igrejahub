@@ -16,22 +16,15 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
+import java.util.stream.Collectors;
 
-/**
- * ISOLAMENTO: transações financeiras pertencem a uma Igreja.
- *
- *   ROOT global        → vê todas as transações da organização
- *   ROOT com contexto  → vê apenas da Igreja atual
- *   Admin/Pastor       → vê apenas da sua Igreja
- *   Pastor Congregação → vê apenas da sua Congregação
- *
- * CRIAÇÃO:
- *   churchId sempre forçado pelo TenantContext (nunca vem do request para não-ROOT)
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -43,41 +36,56 @@ public class FinancialTransactionService {
     private final FinancialAccountService        accountService;
     private final FinancialTransactionMapper     transactionMapper;
     private final SecurityUtils                  securityUtils;
+    private final JdbcTemplate                   jdbcTemplate;
 
-    // ── Listagem ──────────────────────────────────────────────────────────────
+    // ── Listagem com filtros ───────────────────────────────────────────────────
 
     public Page<FinancialTransactionDto> getTransactions(Pageable pageable, FinancialFilterDto filter) {
         Long orgId    = TenantContext.getCurrentTenant();
-        Long churchId = securityUtils.getEffectiveChurchId();
+        Long churchId = securityUtils.getEffectiveChurchId();   // null só para ROOT global
         Long congId   = TenantContext.getCurrentCongregationId();
 
-        FinancialTransaction.TransactionStatus status = null;
-        if (filter != null && filter.getStatus() != null) {
-            status = FinancialTransaction.TransactionStatus.valueOf(filter.getStatus());
+        // Extrair parâmetros do filtro
+        FinancialTransaction.TransactionType   typeEnum   = null;
+        FinancialTransaction.TransactionStatus statusEnum = null;
+        Long memberId = null;
+
+        if (filter != null) {
+            if (filter.getType()   != null) typeEnum   = FinancialTransaction.TransactionType.valueOf(filter.getType());
+            if (filter.getStatus() != null) statusEnum = FinancialTransaction.TransactionStatus.valueOf(filter.getStatus());
+            memberId = filter.getMemberId();
+
+            // Parâmetro churchId do filter pode sobrescrever só para ROOT
+            if (filter.getChurchId() != null && securityUtils.isRoot()) {
+                churchId = filter.getChurchId();
+            }
+            // congregationId do filter pode refinar para admin de Igreja
+            if (filter.getCongregationId() != null) {
+                congId = filter.getCongregationId();
+            }
         }
 
-        // ROOT global → tudo
-        if (securityUtils.canViewAll()) {
-            Page<FinancialTransaction> page = status != null
-                ? transactionRepository.findByOrganizationIdAndStatus(orgId, status, pageable)
-                : transactionRepository.findByOrganizationId(orgId, pageable);
-            return page.map(this::toDtoWithRelations);
-        }
+        // Para PASTOR_CONGREGACAO: forçar congregationId
+        Long effectiveCongId = (congId != null && !securityUtils.isRoot()) ? congId : null;
 
-        // Pastor de Congregação → só da sua congregação
-        if (congId != null && !securityUtils.isRoot()) {
-            return transactionRepository.findByCongregationId(orgId, congId, status, pageable)
-                .map(this::toDtoWithRelations);
-        }
-
-        // Admin/Pastor Igreja ou ROOT com contexto → só da Igreja
-        if (churchId == null) return Page.empty(pageable);
-        return transactionRepository.findByChurchId(orgId, churchId, status, pageable)
-            .map(this::toDtoWithRelations);
+        // findByFilters: churchId = null → ROOT global vê tudo; não-null → filtra
+        return transactionRepository.findByFilters(
+                orgId, typeEnum, churchId, effectiveCongId, statusEnum, memberId, pageable)
+            .map(t -> toDtoWithRelations(t));
     }
 
     public FinancialTransactionDto getTransaction(Long id) {
         return toDtoWithRelations(getOwnedTransaction(id));
+    }
+
+    // ── Contribuições de um membro ────────────────────────────────────────────
+
+    public List<FinancialTransactionDto> getContributions(Long memberId) {
+        Long orgId    = TenantContext.getCurrentTenant();
+        Long churchId = securityUtils.getEffectiveChurchId();
+
+        return transactionRepository.findContributionsByMember(orgId, memberId, churchId)
+            .stream().map(t -> toDtoWithRelations(t)).collect(Collectors.toList());
     }
 
     // ── Criação ───────────────────────────────────────────────────────────────
@@ -88,26 +96,18 @@ public class FinancialTransactionService {
         FinancialAccount account = accountService.getOwnedAccount(request.getAccountId());
         Long categoryId = validateOwnedCategory(request.getCategoryId(), orgId);
 
-        // Determinar Igreja da transação — nunca confia no request para não-ROOT
-        Long targetChurchId;
-        Long targetCongId;
-
-        if (securityUtils.canViewAll()) {
-            // ROOT global: usa o que vier no request (pode escolher a Igreja)
-            targetChurchId = request.getChurchId();
-            targetCongId   = request.getCongregationId();
-        } else {
-            // Todos os outros: forçado pelo TenantContext
-            targetChurchId = securityUtils.getEffectiveChurchId();
-            targetCongId   = TenantContext.getCurrentCongregationId();
-            if (targetChurchId == null) {
-                throw new BusinessException("Seu usuário não está vinculado a nenhuma Igreja.");
-            }
-        }
+        // churchId forçado pelo contexto para não-ROOT
+        Long targetChurchId = securityUtils.canViewAll()
+            ? request.getChurchId()
+            : securityUtils.getEffectiveChurchId();
+        Long targetCongId = securityUtils.canViewAll()
+            ? request.getCongregationId()
+            : TenantContext.getCurrentCongregationId();
 
         FinancialTransaction transaction = FinancialTransaction.builder()
             .churchId(targetChurchId)
             .congregationId(targetCongId)
+            .memberId(request.getMemberId())
             .accountId(account.getId())
             .categoryId(categoryId)
             .type(FinancialTransaction.TransactionType.valueOf(request.getType()))
@@ -123,14 +123,13 @@ public class FinancialTransactionService {
         transaction.setOrganizationId(orgId);
 
         transaction = transactionRepository.save(transaction);
-        log.info("Transaction created: {} churchId={} by={}",
-            transaction.getDescription(), transaction.getChurchId(),
-            TenantContext.getCurrentUserId());
-
+        log.info("Transaction created: type={} churchId={} memberId={} by={}",
+            transaction.getType(), transaction.getChurchId(),
+            transaction.getMemberId(), TenantContext.getCurrentUserId());
         return toDtoWithRelations(transaction);
     }
 
-    // ── Update ────────────────────────────────────────────────────────────────
+    // ── Update / Confirm / Cancel ─────────────────────────────────────────────
 
     @Transactional
     public FinancialTransactionDto updateTransaction(Long id, UpdateTransactionRequest request) {
@@ -138,15 +137,14 @@ public class FinancialTransactionService {
         if (transaction.getStatus() != FinancialTransaction.TransactionStatus.PENDING) {
             throw new BusinessException("Somente transações pendentes podem ser editadas");
         }
+        if (request.getAccountId()   != null) { accountService.getOwnedAccount(request.getAccountId()); transaction.setAccountId(request.getAccountId()); }
+        if (request.getCategoryId()  != null) transaction.setCategoryId(validateOwnedCategory(request.getCategoryId(), transaction.getOrganizationId()));
         if (request.getDescription() != null) transaction.setDescription(request.getDescription());
-        if (request.getAmount() != null) transaction.setAmountCents(FinancialAccountMapper.amountToCents(request.getAmount()));
+        if (request.getAmount()      != null) transaction.setAmountCents(FinancialAccountMapper.amountToCents(request.getAmount()));
         if (request.getTransactionDate() != null) transaction.setTransactionDate(request.getTransactionDate());
-        if (request.getCategoryId() != null) transaction.setCategoryId(
-            validateOwnedCategory(request.getCategoryId(), transaction.getOrganizationId()));
-        if (request.getPaymentMethod() != null) transaction.setPaymentMethod(
-            FinancialTransaction.PaymentMethod.valueOf(request.getPaymentMethod()));
-        if (request.getReference() != null) transaction.setReference(request.getReference());
-        if (request.getNotes() != null) transaction.setNotes(request.getNotes());
+        if (request.getPaymentMethod()   != null) transaction.setPaymentMethod(FinancialTransaction.PaymentMethod.valueOf(request.getPaymentMethod()));
+        if (request.getReference()   != null) transaction.setReference(request.getReference());
+        if (request.getNotes()       != null) transaction.setNotes(request.getNotes());
         return toDtoWithRelations(transactionRepository.save(transaction));
     }
 
@@ -160,7 +158,6 @@ public class FinancialTransactionService {
         long delta = transaction.getType() == FinancialTransaction.TransactionType.REVENUE
             ? transaction.getAmountCents() : -transaction.getAmountCents();
         accountService.adjustBalance(transaction.getAccountId(), delta);
-
         transaction.setStatus(FinancialTransaction.TransactionStatus.CONFIRMED);
         transaction.setApprovedBy(userId);
         transaction.setApprovedAt(LocalDate.now());
@@ -206,29 +203,33 @@ public class FinancialTransactionService {
             ? categoryRepository.findByIdAndOrganizationId(
                 transaction.getCategoryId(), transaction.getOrganizationId()).orElse(null)
             : null;
-        return transactionMapper.toDto(transaction, account, category);
+        // Resolver nome do membro via SQL direto (sem criar dependência circular)
+        String memberName = null;
+        if (transaction.getMemberId() != null) {
+            try {
+                memberName = jdbcTemplate.queryForObject(
+                    "SELECT name FROM members WHERE id = ? AND deleted = false",
+                    String.class, transaction.getMemberId());
+            } catch (Exception ignored) {}
+        }
+        return transactionMapper.toDto(transaction, account, category, memberName);
     }
 
     private FinancialTransaction getOwnedTransaction(Long id) {
         FinancialTransaction transaction = transactionRepository.findById(id)
             .orElseThrow(() -> new ResourceNotFoundException("FinancialTransaction", id));
-
         if (!transaction.getOrganizationId().equals(TenantContext.getCurrentTenant())) {
             throw new BusinessException("Acesso não autorizado");
         }
-
-        // Validar isolamento de Igreja para não-ROOT
         if (!securityUtils.canViewAll()) {
             Long callerChurchId = securityUtils.getEffectiveChurchId();
             Long callerCongId   = TenantContext.getCurrentCongregationId();
-
             if (callerCongId != null && !callerCongId.equals(transaction.getCongregationId())) {
                 throw new BusinessException("Você não tem acesso a esta transação.");
             } else if (callerChurchId != null && !callerChurchId.equals(transaction.getChurchId())) {
                 throw new BusinessException("Você não tem acesso a esta transação.");
             }
         }
-
         return transaction;
     }
 

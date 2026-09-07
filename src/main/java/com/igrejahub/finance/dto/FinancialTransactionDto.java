@@ -9,6 +9,8 @@ public class FinancialTransactionDto {
     private Long id;
     private Long churchId;
     private Long congregationId;
+    private Long memberId;          // NOVO
+    private String memberName;      // NOVO — nome do membro vinculado
     private Long accountId;
     private String accountName;
     private Long categoryId;

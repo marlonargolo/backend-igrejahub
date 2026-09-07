@@ -7,9 +7,10 @@ import java.time.LocalDate;
 public class FinancialFilterDto {
     private Long churchId;
     private Long congregationId;
+    private Long memberId;    // NOVO — filtrar contribuições por membro
     private Long accountId;
     private Long categoryId;
-    private String type;
+    private String type;      // REVENUE | EXPENSE
     private String status;
     private LocalDate startDate;
     private LocalDate endDate;

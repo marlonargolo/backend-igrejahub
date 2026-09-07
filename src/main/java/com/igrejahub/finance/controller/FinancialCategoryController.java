@@ -18,13 +18,14 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/finance/categories")
-@Tag(name = "Finance Categories", description = "Categorias financeiras")
+@Tag(name = "Finance Categories")
 @RequiredArgsConstructor
 @SecurityRequirement(name = "BearerAuth")
 public class FinancialCategoryController {
 
     private final FinancialCategoryService categoryService;
 
+    /** Paginado — sem filtro de tipo */
     @GetMapping
     @PreAuthorize("hasPermission(null, 'FINANCE_VIEW')")
     public ResponseEntity<ApiResponse<Page<FinancialCategoryDto>>> getCategories(
@@ -32,31 +33,37 @@ public class FinancialCategoryController {
         return ResponseEntity.ok(ApiResponse.success(categoryService.getCategories(pageable)));
     }
 
+    /** Lista ativa — aceita ?type=REVENUE|EXPENSE para filtrar por tipo */
     @GetMapping("/active")
     @PreAuthorize("hasPermission(null, 'FINANCE_VIEW')")
-    public ResponseEntity<ApiResponse<List<FinancialCategoryDto>>> getActiveCategories() {
+    public ResponseEntity<ApiResponse<List<FinancialCategoryDto>>> getActiveCategories(
+            @RequestParam(required = false) String type) {
+        if (type != null && !type.isBlank()) {
+            return ResponseEntity.ok(ApiResponse.success(
+                categoryService.getActiveCategoriesByType(type)));
+        }
         return ResponseEntity.ok(ApiResponse.success(categoryService.getActiveCategories()));
     }
 
     @PostMapping
-    @PreAuthorize("hasPermission(null, 'FINANCE_MANAGE')")
-    public ResponseEntity<ApiResponse<FinancialCategoryDto>> createCategory(@RequestBody Map<String, String> body) {
-        var dto = categoryService.createCategory(body.get("name"), body.get("type"), body.get("color"));
-        return ResponseEntity.ok(ApiResponse.success(dto));
+    @PreAuthorize("hasPermission(null, 'FINANCE_VIEW')")
+    public ResponseEntity<ApiResponse<FinancialCategoryDto>> createCategory(
+            @RequestBody Map<String, String> body) {
+        return ResponseEntity.ok(ApiResponse.success(
+            categoryService.createCategory(body.get("name"), body.get("type"), body.get("color"))));
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasPermission(null, 'FINANCE_MANAGE')")
+    @PreAuthorize("hasPermission(null, 'FINANCE_VIEW')")
     public ResponseEntity<ApiResponse<FinancialCategoryDto>> updateCategory(
             @PathVariable Long id, @RequestBody Map<String, Object> body) {
-        String name = (String) body.get("name");
-        String color = (String) body.get("color");
-        Boolean active = body.get("active") != null ? (Boolean) body.get("active") : null;
-        return ResponseEntity.ok(ApiResponse.success(categoryService.updateCategory(id, name, color, active)));
+        return ResponseEntity.ok(ApiResponse.success(categoryService.updateCategory(
+            id, (String) body.get("name"), (String) body.get("color"),
+            body.get("active") != null ? (Boolean) body.get("active") : null)));
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasPermission(null, 'FINANCE_MANAGE')")
+    @PreAuthorize("hasPermission(null, 'FINANCE_VIEW')")
     public ResponseEntity<ApiResponse<Void>> deleteCategory(@PathVariable Long id) {
         categoryService.deleteCategory(id);
         return ResponseEntity.ok(ApiResponse.success());
