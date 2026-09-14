@@ -1,5 +1,6 @@
 package com.igrejahub.finance.service;
 
+import com.igrejahub.audit.service.AuditLogService;
 import com.igrejahub.common.exception.BusinessException;
 import com.igrejahub.common.exception.ResourceNotFoundException;
 import com.igrejahub.common.tenant.TenantContext;
@@ -37,13 +38,15 @@ public class FinancialTransactionService {
     private final FinancialTransactionMapper     transactionMapper;
     private final SecurityUtils                  securityUtils;
     private final JdbcTemplate                   jdbcTemplate;
+    private final AuditLogService                auditLogService;
 
     // ── Listagem com filtros ───────────────────────────────────────────────────
 
     public Page<FinancialTransactionDto> getTransactions(Pageable pageable, FinancialFilterDto filter) {
-        Long orgId    = TenantContext.getCurrentTenant();
-        Long churchId = securityUtils.getEffectiveChurchId();   // null só para ROOT global
-        Long congId   = TenantContext.getCurrentCongregationId();
+        Long orgId      = TenantContext.getCurrentTenant();
+        Long churchId   = securityUtils.getEffectiveChurchId();   // null só para ROOT global
+        Long ownCongId  = TenantContext.getCurrentCongregationId(); // fixo p/ usuário de congregação
+        Long congId     = ownCongId;
 
         // Extrair parâmetros do filtro
         FinancialTransaction.TransactionType   typeEnum   = null;
@@ -55,22 +58,22 @@ public class FinancialTransactionService {
             if (filter.getStatus() != null) statusEnum = FinancialTransaction.TransactionStatus.valueOf(filter.getStatus());
             memberId = filter.getMemberId();
 
-            // Parâmetro churchId do filter pode sobrescrever só para ROOT
+            // Parâmetro churchId do filter só pode sobrescrever para ROOT
             if (filter.getChurchId() != null && securityUtils.isRoot()) {
                 churchId = filter.getChurchId();
             }
-            // congregationId do filter pode refinar para admin de Igreja
-            if (filter.getCongregationId() != null) {
+            // congregationId do filter: ROOT escolhe livremente; admin de Igreja (sem
+            // congregação própria) pode restringir a uma congregação da SUA igreja;
+            // um usuário já vinculado a uma congregação NUNCA pode sobrescrever a própria.
+            if (filter.getCongregationId() != null
+                    && (securityUtils.isRoot() || ownCongId == null)) {
                 congId = filter.getCongregationId();
             }
         }
 
-        // Para PASTOR_CONGREGACAO: forçar congregationId
-        Long effectiveCongId = (congId != null && !securityUtils.isRoot()) ? congId : null;
-
         // findByFilters: churchId = null → ROOT global vê tudo; não-null → filtra
         return transactionRepository.findByFilters(
-                orgId, typeEnum, churchId, effectiveCongId, statusEnum, memberId, pageable)
+                orgId, typeEnum, churchId, congId, statusEnum, memberId, pageable)
             .map(t -> toDtoWithRelations(t));
     }
 
@@ -164,7 +167,10 @@ public class FinancialTransactionService {
         transaction.setConfirmedAt(request != null && request.getConfirmedAt() != null
             ? request.getConfirmedAt() : LocalDate.now());
         if (request != null && request.getNotes() != null) transaction.setNotes(request.getNotes());
-        return toDtoWithRelations(transactionRepository.save(transaction));
+        transaction = transactionRepository.save(transaction);
+        auditLogService.logAction("CONFIRM_TRANSACTION", "FINANCIAL_TRANSACTION", transaction.getId(),
+            null, java.util.Map.of("amountCents", transaction.getAmountCents(), "type", transaction.getType().name()));
+        return toDtoWithRelations(transaction);
     }
 
     @Transactional
@@ -183,13 +189,15 @@ public class FinancialTransactionService {
         transaction.setCancelledAt(LocalDate.now());
         transaction.setNotes(((transaction.getNotes() != null ? transaction.getNotes() + " | " : "")
             + "Cancelado: " + request.getReason()));
-        return toDtoWithRelations(transactionRepository.save(transaction));
+        transaction = transactionRepository.save(transaction);
+        auditLogService.logAction("CANCEL_TRANSACTION", "FINANCIAL_TRANSACTION", transaction.getId(),
+            null, java.util.Map.of("reason", request.getReason()));
+        return toDtoWithRelations(transaction);
     }
 
     @Transactional
     public void updateAttachment(Long id, String url) {
-        FinancialTransaction tx = transactionRepository.findById(id)
-            .orElseThrow(() -> new ResourceNotFoundException("Transaction", id));
+        FinancialTransaction tx = getOwnedTransaction(id);
         tx.setNotes((tx.getNotes() != null ? tx.getNotes() + " | " : "") + "ATTACHMENT:" + url);
         transactionRepository.save(tx);
     }

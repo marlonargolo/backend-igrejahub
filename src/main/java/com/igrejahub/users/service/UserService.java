@@ -1,5 +1,6 @@
 package com.igrejahub.users.service;
 
+import com.igrejahub.audit.service.AuditLogService;
 import com.igrejahub.common.exception.BusinessException;
 import com.igrejahub.common.exception.ResourceNotFoundException;
 import com.igrejahub.common.tenant.TenantContext;
@@ -43,6 +44,7 @@ public class UserService {
     private final UserMapper      userMapper;
     private final SecurityUtils   securityUtils;
     private final JdbcTemplate    jdbcTemplate;
+    private final AuditLogService auditLogService;
 
     // ── Listagem ──────────────────────────────────────────────────────────────
 
@@ -132,6 +134,8 @@ public class UserService {
 
         log.info("User created: {} church={} by={}", user.getEmail(), user.getChurchId(),
             TenantContext.getCurrentUserId());
+        auditLogService.logAction("CREATE_USER", "USER", user.getId(), null,
+            Map.of("email", user.getEmail(), "churchId", String.valueOf(user.getChurchId())));
         return userMapper.toDto(user);
     }
 

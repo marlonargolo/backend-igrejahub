@@ -21,6 +21,8 @@ public class AuditLog {
     private Long id;
     @Column(name = "organization_id", nullable = false)
     private Long organizationId;
+    @Column(name = "church_id")
+    private Long churchId;
     @Column(name = "user_id")
     private Long userId;
     @Column(name = "user_email", length = 100)

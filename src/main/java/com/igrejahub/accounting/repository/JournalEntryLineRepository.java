@@ -15,7 +15,9 @@ public interface JournalEntryLineRepository extends JpaRepository<JournalEntryLi
 
     @Query("SELECT COALESCE(SUM(l.debitCents), 0) - COALESCE(SUM(l.creditCents), 0) FROM JournalEntryLine l " +
            "JOIN l.journalEntry e WHERE l.accountId = :accountId AND e.organizationId = :orgId " +
+           "AND (:churchId IS NULL OR e.churchId = :churchId) " +
            "AND e.status = 'POSTED' AND e.entryDate BETWEEN :startDate AND :endDate")
     Long sumBalanceByAccountAndPeriod(@Param("orgId") Long organizationId, @Param("accountId") Long accountId,
+                                       @Param("churchId") Long churchId,
                                        @Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
 }

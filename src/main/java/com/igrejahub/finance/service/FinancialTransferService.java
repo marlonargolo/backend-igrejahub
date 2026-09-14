@@ -8,6 +8,7 @@ import com.igrejahub.finance.entity.FinancialTransfer;
 import com.igrejahub.finance.mapper.FinancialAccountMapper;
 import com.igrejahub.finance.mapper.FinancialTransferMapper;
 import com.igrejahub.finance.repository.FinancialTransferRepository;
+import com.igrejahub.security.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -16,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
@@ -25,12 +27,23 @@ public class FinancialTransferService {
     private final FinancialTransferRepository transferRepository;
     private final FinancialAccountService accountService;
     private final FinancialTransferMapper transferMapper;
+    private final SecurityUtils securityUtils;
 
     public Page<FinancialTransferDto> getTransfers(Pageable pageable) {
-        return transferRepository.findByOrganizationId(TenantContext.getCurrentTenant(), pageable)
-                .map(t -> transferMapper.toDto(t,
-                        accountService.getOwnedAccount(t.getFromAccountId()),
-                        accountService.getOwnedAccount(t.getToAccountId())));
+        Long orgId = TenantContext.getCurrentTenant();
+
+        Page<FinancialTransfer> page;
+        if (securityUtils.canViewAll()) {
+            page = transferRepository.findByOrganizationId(orgId, pageable);
+        } else {
+            Long churchId = securityUtils.getEffectiveChurchId();
+            page = churchId == null
+                ? Page.empty(pageable)
+                : transferRepository.findByOrganizationIdAndChurchId(orgId, churchId, pageable);
+        }
+        return page.map(t -> transferMapper.toDto(t,
+                accountService.getOwnedAccount(t.getFromAccountId()),
+                accountService.getOwnedAccount(t.getToAccountId())));
     }
 
     @Transactional
@@ -41,12 +54,16 @@ public class FinancialTransferService {
         }
         FinancialAccount from = accountService.getOwnedAccount(fromAccountId);
         FinancialAccount to = accountService.getOwnedAccount(toAccountId);
+        if (!Objects.equals(from.getChurchId(), to.getChurchId())) {
+            throw new BusinessException("Não é possível transferir entre contas de igrejas diferentes");
+        }
         long cents = FinancialAccountMapper.amountToCents(amount);
 
         accountService.debitIfSufficient(from.getId(), cents);
         accountService.adjustBalance(to.getId(), cents);
 
         FinancialTransfer transfer = FinancialTransfer.builder()
+                .churchId(from.getChurchId())
                 .fromAccountId(fromAccountId)
                 .toAccountId(toAccountId)
                 .amountCents(cents)

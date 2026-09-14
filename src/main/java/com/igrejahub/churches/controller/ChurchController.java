@@ -95,7 +95,7 @@ public class ChurchController {
     @Operation(summary = "Criar Igreja (apenas ROOT)")
     @PostMapping
     @PreAuthorize("hasPermission(null, 'ROOT_ACCESS')")
-    public ResponseEntity<ApiResponse<ChurchDto>> createChurch(
+    public ResponseEntity<ApiResponse<CreateChurchResponse>> createChurch(
             @Valid @RequestBody CreateChurchRequest request) {
         return ResponseEntity.ok(ApiResponse.success(churchService.createChurch(request)));
     }

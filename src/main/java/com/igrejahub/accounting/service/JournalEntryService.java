@@ -15,6 +15,7 @@ import com.igrejahub.accounting.repository.JournalEntryRepository;
 import com.igrejahub.common.exception.BusinessException;
 import com.igrejahub.common.exception.ResourceNotFoundException;
 import com.igrejahub.common.tenant.TenantContext;
+import com.igrejahub.security.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -38,12 +39,26 @@ public class JournalEntryService {
     private final AccountingPeriodRepository periodRepository;
     private final JournalEntryMapper journalEntryMapper;
     private final JournalEntryLineMapper lineMapper;
+    private final SecurityUtils securityUtils;
 
     public Page<JournalEntryDto> getEntries(Pageable pageable, String status) {
         Long orgId = TenantContext.getCurrentTenant();
-        Page<JournalEntry> page = status != null
-                ? journalEntryRepository.findByOrganizationIdAndStatus(orgId, status, pageable)
-                : journalEntryRepository.findByOrganizationId(orgId, pageable);
+
+        Page<JournalEntry> page;
+        if (securityUtils.canViewAll()) {
+            page = status != null
+                    ? journalEntryRepository.findByOrganizationIdAndStatus(orgId, status, pageable)
+                    : journalEntryRepository.findByOrganizationId(orgId, pageable);
+        } else {
+            Long churchId = securityUtils.getEffectiveChurchId();
+            if (churchId == null) {
+                page = Page.empty(pageable);
+            } else {
+                page = status != null
+                        ? journalEntryRepository.findByOrganizationIdAndChurchIdAndStatus(orgId, churchId, status, pageable)
+                        : journalEntryRepository.findByOrganizationIdAndChurchId(orgId, churchId, pageable);
+            }
+        }
         return page.map(this::toDtoWithTotals);
     }
 
@@ -63,9 +78,16 @@ public class JournalEntryService {
                 .orElseThrow(() -> new BusinessException(
                         "Não há período contábil aberto para a data " + request.getEntryDate()));
 
+        Long targetChurchId = securityUtils.canViewAll()
+            ? request.getChurchId()
+            : securityUtils.getEffectiveChurchId();
+        if (targetChurchId == null && !securityUtils.canViewAll()) {
+            throw new BusinessException("Seu usuário não está vinculado a nenhuma Igreja.");
+        }
+
         JournalEntry entry = new JournalEntry();
         entry.setOrganizationId(orgId);
-        entry.setChurchId(request.getChurchId());
+        entry.setChurchId(targetChurchId);
         entry.setEntryNumber(generateEntryNumber(orgId, request.getEntryDate()));
         entry.setEntryDate(request.getEntryDate());
         entry.setDescription(request.getDescription());
@@ -200,7 +222,14 @@ public class JournalEntryService {
     }
 
     private JournalEntry getOwned(Long id) {
-        return journalEntryRepository.findByOrganizationIdAndId(TenantContext.getCurrentTenant(), id)
+        JournalEntry entry = journalEntryRepository.findByOrganizationIdAndId(TenantContext.getCurrentTenant(), id)
                 .orElseThrow(() -> new ResourceNotFoundException("JournalEntry", id));
+        if (!securityUtils.canViewAll()) {
+            Long callerChurchId = securityUtils.getEffectiveChurchId();
+            if (callerChurchId == null || !callerChurchId.equals(entry.getChurchId())) {
+                throw new BusinessException("Você não tem acesso a este lançamento contábil.");
+            }
+        }
+        return entry;
     }
 }

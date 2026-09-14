@@ -1,5 +1,6 @@
 package com.igrejahub.documents.controller;
 
+import com.igrejahub.audit.service.AuditLogService;
 import com.igrejahub.common.dto.ApiResponse;
 import com.igrejahub.common.dto.PaginatedResponse;
 import com.igrejahub.common.exception.BusinessException;
@@ -38,6 +39,7 @@ public class DocumentController {
 
     private final DocumentRepository documentRepository;
     private final SecurityUtils       securityUtils;
+    private final AuditLogService     auditLogService;
 
     private static final Path UPLOAD_DIR = Paths.get("/app/uploads/documents");
 
@@ -96,6 +98,8 @@ public class DocumentController {
         doc = documentRepository.save(doc);
 
         log.info("Document '{}' uploaded to churchId={} by={}", title, churchId, userId);
+        auditLogService.logAction("UPLOAD_DOCUMENT", "DOCUMENT", doc.getId(), null,
+            Map.of("title", title, "churchId", String.valueOf(churchId)));
         return ResponseEntity.ok(ApiResponse.success(toMap(doc)));
     }
 
@@ -109,6 +113,7 @@ public class DocumentController {
         doc.setDeleted(true);
         doc.setUpdatedAt(LocalDateTime.now());
         documentRepository.save(doc);
+        auditLogService.logAction("DELETE_DOCUMENT", "DOCUMENT", doc.getId(), null, null);
         return ResponseEntity.ok(ApiResponse.success());
     }
 

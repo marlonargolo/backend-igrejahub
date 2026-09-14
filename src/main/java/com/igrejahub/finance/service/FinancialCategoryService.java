@@ -33,7 +33,10 @@ public class FinancialCategoryService {
     private final SecurityUtils               securityUtils;
 
     public Page<FinancialCategoryDto> getCategories(Pageable pageable) {
-        return categoryRepository.findByOrganizationId(TenantContext.getCurrentTenant(), pageable)
+        Long orgId    = TenantContext.getCurrentTenant();
+        boolean viewAll = securityUtils.canViewAll();
+        Long churchId = viewAll ? null : securityUtils.getEffectiveChurchId();
+        return categoryRepository.findVisible(orgId, viewAll, churchId, pageable)
             .map(categoryMapper::toDto);
     }
 
