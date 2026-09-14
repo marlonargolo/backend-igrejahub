@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -32,7 +33,6 @@ public class FinancialSummaryService {
         LocalDate start = startDate != null ? startDate : LocalDate.now().withDayOfMonth(1);
         LocalDate end   = endDate   != null ? endDate   : LocalDate.now();
 
-        // Usar queries com filtro de churchId e congregationId
         long revenueCents = transactionRepository.sumConfirmedRevenueCentsByFilter(
             orgId, start, end, churchId, congId);
         long expenseCents = transactionRepository.sumConfirmedExpenseCentsByFilter(
@@ -43,31 +43,37 @@ public class FinancialSummaryService {
         BigDecimal revenue = FinancialAccountMapper.centsToAmount(revenueCents);
         BigDecimal expense = FinancialAccountMapper.centsToAmount(expenseCents);
 
-        return FinancialSummaryDto.builder()
-            .totalRevenue(revenue)
-            .totalExpense(expense)
-            .balance(revenue.subtract(expense))
-            .totalAssetsBalance(BigDecimal.ZERO)
-            .pendingTransactions(pending)
-            .revenueByCategory(breakdown(orgId, FinancialTransaction.TransactionType.REVENUE, start, end))
-            .expenseByCategory(breakdown(orgId, FinancialTransaction.TransactionType.EXPENSE, start, end))
-            .build();
+        List<FinancialSummaryDto.CategoryBreakdown> revenueBreakdown =
+            buildBreakdown(orgId, FinancialTransaction.TransactionType.REVENUE, start, end);
+        List<FinancialSummaryDto.CategoryBreakdown> expenseBreakdown =
+            buildBreakdown(orgId, FinancialTransaction.TransactionType.EXPENSE, start, end);
+
+        return new FinancialSummaryDto(
+            revenue,
+            expense,
+            revenue.subtract(expense),
+            BigDecimal.ZERO,
+            pending,
+            revenueBreakdown,
+            expenseBreakdown
+        );
     }
 
-    private List<FinancialSummaryDto.CategoryBreakdown> breakdown(Long orgId,
+    private List<FinancialSummaryDto.CategoryBreakdown> buildBreakdown(Long orgId,
             FinancialTransaction.TransactionType type, LocalDate start, LocalDate end) {
-        return transactionRepository.sumConfirmedByCategoryAndPeriod(orgId, type, start, end).stream()
-            .map(row -> {
-                Long categoryId = (Long) row[0];
-                long cents = ((Number) row[1]).longValue();
-                String name = categoryId != null
-                    ? categoryRepository.findById(categoryId)
-                        .map(c -> c.getName()).orElse("Sem categoria")
-                    : "Sem categoria";
-                return FinancialSummaryDto.CategoryBreakdown.builder()
-                    .categoryId(categoryId).categoryName(name)
-                    .amount(FinancialAccountMapper.centsToAmount(cents))
-                    .build();
-            }).toList();
+        List<Object[]> rows = transactionRepository.sumConfirmedByCategoryAndPeriod(orgId, type, start, end);
+        List<FinancialSummaryDto.CategoryBreakdown> result = new ArrayList<>();
+        for (Object[] row : rows) {
+            Long categoryId = (Long) row[0];
+            long cents = ((Number) row[1]).longValue();
+            String name = "Sem categoria";
+            if (categoryId != null) {
+                name = categoryRepository.findById(categoryId)
+                    .map(c -> c.getName()).orElse("Sem categoria");
+            }
+            result.add(new FinancialSummaryDto.CategoryBreakdown(
+                categoryId, name, FinancialAccountMapper.centsToAmount(cents)));
+        }
+        return result;
     }
 }

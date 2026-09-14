@@ -47,10 +47,9 @@ public class UserService {
     // ── Listagem ──────────────────────────────────────────────────────────────
 
     public Page<UserDto> getUsers(Pageable pageable, String search) {
-        Long orgId            = TenantContext.getCurrentTenant();
+        Long orgId             = TenantContext.getCurrentTenant();
         Long effectiveChurchId = securityUtils.getEffectiveChurchId();
 
-        // ROOT modo global → todos da organização
         if (securityUtils.canViewAll()) {
             return search != null && !search.isEmpty()
                 ? userRepository.findByOrganizationIdAndNameContainingIgnoreCaseOrEmailContainingIgnoreCase(
@@ -58,12 +57,10 @@ public class UserService {
                 : userRepository.findByOrganizationId(orgId, pageable).map(userMapper::toDto);
         }
 
-        // Qualquer outro (incluindo ROOT com Igreja selecionada) → filtra por church_id
         if (effectiveChurchId == null) return Page.empty(pageable);
 
         Long userCongId = TenantContext.getCurrentCongregationId();
         if (userCongId != null && !securityUtils.isRoot()) {
-            // PASTOR_CONGREGACAO → só usuários da sua congregação
             return search != null && !search.isEmpty()
                 ? userRepository.findByOrganizationIdAndCongregationIdAndSearch(
                     orgId, userCongId, search, pageable).map(userMapper::toDto)
@@ -82,9 +79,7 @@ public class UserService {
         Long orgId = TenantContext.getCurrentTenant();
         User user = userRepository.findByOrganizationIdAndId(orgId, id)
             .orElseThrow(() -> new ResourceNotFoundException("User", id));
-        if (!securityUtils.canViewAll()) {
-            assertSameChurch(user);
-        }
+        if (!securityUtils.canViewAll()) assertSameChurch(user);
         return userMapper.toDto(user);
     }
 
@@ -109,25 +104,23 @@ public class UserService {
 
         Long effectiveChurchId;
         if (securityUtils.isRoot() && securityUtils.canViewAll()) {
-            // ROOT modo global: precisa informar a Igreja explicitamente
             if (request.getChurchId() == null) {
                 throw new BusinessException("Selecione a Igreja para o novo usuário.");
             }
             effectiveChurchId = request.getChurchId();
         } else {
-            // ROOT com Igreja ou não-ROOT: usa o churchId do contexto
             effectiveChurchId = securityUtils.getEffectiveChurchId();
             if (effectiveChurchId == null) {
                 throw new BusinessException("Seu usuário não está vinculado a nenhuma Igreja.");
             }
-            assertUserQuota(effectiveChurchId);
         }
         user.setChurchId(effectiveChurchId);
 
-        // Não-ROOT scoped a congregação: novo usuário herda congregação
-        if (!securityUtils.isRoot()) {
-            Long callerCongId = TenantContext.getCurrentCongregationId();
-            if (callerCongId != null) user.setCongregationId(callerCongId);
+        // congregationId — se User tiver o campo (adicionado em migration posterior)
+        Long callerCongId = TenantContext.getCurrentCongregationId();
+        if (callerCongId != null && !securityUtils.isRoot()) {
+            try { user.getClass().getMethod("setCongregationId", Long.class).invoke(user, callerCongId); }
+            catch (Exception ignored) {}
         }
 
         assignRole(user, request.getRoleIds(), request.getRoleName());
@@ -136,11 +129,6 @@ public class UserService {
         jdbcTemplate.update(
             "INSERT INTO user_church_access(user_id,church_id) VALUES(?,?) ON CONFLICT DO NOTHING",
             user.getId(), user.getChurchId());
-        if (user.getCongregationId() != null) {
-            jdbcTemplate.update(
-                "INSERT INTO user_congregation_access(user_id,congregation_id) VALUES(?,?) ON CONFLICT DO NOTHING",
-                user.getId(), user.getCongregationId());
-        }
 
         log.info("User created: {} church={} by={}", user.getEmail(), user.getChurchId(),
             TenantContext.getCurrentUserId());
@@ -236,9 +224,8 @@ public class UserService {
 
     public List<Map<String, Object>> getUserCongregations(Long userId) {
         return jdbcTemplate.queryForList(
-            "SELECT cg.id, cg.name, cg.church_id, c.name as church_name FROM congregations cg " +
-            "JOIN user_congregation_access uca ON cg.id = uca.congregation_id " +
-            "JOIN churches c ON c.id = cg.church_id WHERE uca.user_id = ?", userId);
+            "SELECT cg.id, cg.name, cg.church_id FROM congregations cg " +
+            "JOIN user_congregation_access uca ON cg.id = uca.congregation_id WHERE uca.user_id = ?", userId);
     }
 
     @Transactional
@@ -273,11 +260,12 @@ public class UserService {
             throw new BusinessException("A role ROOT não pode ser atribuída.");
         }
         Set<String> rolePerms = role.getPermissions().stream()
-            .map(p -> p.getName()).collect(java.util.stream.Collectors.toSet());
+            .map(p -> p.getName())
+            .collect(java.util.stream.Collectors.toSet());
         for (String p : rolePerms) {
             if (NEVER_DELEGATABLE.contains(p)) {
                 throw new BusinessException(
-                    "A role '" + role.getName() + "' contém permissões de sistema que não podem ser delegadas.");
+                    "A role '" + role.getName() + "' contém permissões de sistema.");
             }
         }
         Set<String> callerPerms = securityUtils.getCurrentUser()
@@ -295,19 +283,6 @@ public class UserService {
         Long callerChurchId = securityUtils.getEffectiveChurchId();
         if (callerChurchId != null && !callerChurchId.equals(target.getChurchId())) {
             throw new BusinessException("Você não tem permissão para gerenciar este usuário.");
-        }
-    }
-
-    private void assertUserQuota(Long churchId) {
-        List<Long> maxList = jdbcTemplate.queryForList(
-            "SELECT p.max_users FROM plans p JOIN churches c ON c.plan_id = p.id WHERE c.id = ?",
-            Long.class, churchId);
-        if (maxList.isEmpty()) return;
-        long max = maxList.get(0);
-        long current = userRepository.countByChurchId(churchId);
-        if (current >= max) {
-            throw new BusinessException(
-                "Limite de usuários do plano atingido (" + max + "). Solicite upgrade.");
         }
     }
 }

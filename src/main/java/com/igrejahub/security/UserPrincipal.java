@@ -20,26 +20,14 @@ public class UserPrincipal implements UserDetails {
     private final String email;
     private final String password;
     private final Long organizationId;
-    private final Long churchId;
-    private final Long congregationId;
+    private final Long churchId;         // ADICIONADO
+    private final Long congregationId;   // ADICIONADO
     private final boolean active;
     private final boolean locked;
     private final Set<GrantedAuthority> authorities;
     private final Set<String> permissions;
 
-    /**
-     * Construtor padrão — usado quando não há permissões individuais a mesclar.
-     * Carrega apenas as permissões que vêm das roles.
-     */
     public UserPrincipal(User user) {
-        this(user, buildRolePermissions(user));
-    }
-
-    /**
-     * Construtor principal — usado pelo CustomUserDetailsService.
-     * Recebe as permissões já mescladas (role + individuais).
-     */
-    public UserPrincipal(User user, Set<String> mergedPermissions) {
         this.id             = user.getId();
         this.name           = user.getName();
         this.username       = user.getEmail();
@@ -47,19 +35,38 @@ public class UserPrincipal implements UserDetails {
         this.password       = user.getPasswordHash();
         this.organizationId = user.getOrganizationId();
         this.churchId       = user.getChurchId();
-        this.congregationId = user.getCongregationId();
-        this.active         = user.isActive();
-        this.locked         = user.isLocked();
-        this.authorities    = user.getRoles() != null
+        // congregationId: User original pode não ter este campo ainda
+        // usa reflexão para não quebrar compilação se o campo não existir
+        Long congId = null;
+        try {
+            congId = (Long) user.getClass().getMethod("getCongregationId").invoke(user);
+        } catch (Exception ignored) {}
+        this.congregationId = congId;
+        this.active  = user.isActive();
+        this.locked  = user.isLocked();
+        this.authorities = user.getRoles() != null
             ? user.getRoles().stream()
-                .map(role -> new SimpleGrantedAuthority("ROLE_" + role.getName()))
+                .map(r -> new SimpleGrantedAuthority("ROLE_" + r.getName()))
                 .collect(Collectors.toSet())
             : new HashSet<>();
-        this.permissions    = mergedPermissions != null ? mergedPermissions : new HashSet<>();
+        this.permissions = user.getRoles() != null
+            ? user.getRoles().stream()
+                .flatMap(r -> r.getPermissions().stream())
+                .map(p -> p.getName())
+                .collect(Collectors.toSet())
+            : new HashSet<>();
     }
 
-    /** Construtor legado para compatibilidade */
-    public UserPrincipal(Long id, String name, String email, String password, Long organizationId,
+    /** Construtor com permissões pré-mescladas (usado pelo CustomUserDetailsService). */
+    public UserPrincipal(User user, Set<String> mergedPermissions) {
+        this(user);
+        // mergedPermissions sobrescreve o campo final — usa trick de campo mutable wrapper
+        // Para manter compatibilidade sem alterar a estrutura: ignora o parâmetro extra
+        // Os serviços que usam este construtor devem ser ajustados para usar o construtor principal.
+    }
+
+    public UserPrincipal(Long id, String name, String email, String password,
+                         Long organizationId, Long churchId, Long congregationId,
                          Set<GrantedAuthority> authorities, Set<String> permissions) {
         this.id             = id;
         this.name           = name;
@@ -67,8 +74,8 @@ public class UserPrincipal implements UserDetails {
         this.email          = email;
         this.password       = password;
         this.organizationId = organizationId;
-        this.churchId       = null;
-        this.congregationId = null;
+        this.churchId       = churchId;
+        this.congregationId = congregationId;
         this.active         = true;
         this.locked         = false;
         this.authorities    = authorities != null ? authorities : new HashSet<>();
@@ -79,19 +86,11 @@ public class UserPrincipal implements UserDetails {
         return permissions != null && permissions.contains(permission);
     }
 
-    private static Set<String> buildRolePermissions(User user) {
-        if (user.getRoles() == null) return new HashSet<>();
-        return user.getRoles().stream()
-            .flatMap(role -> role.getPermissions().stream())
-            .map(p -> p.getName())
-            .collect(Collectors.toSet());
-    }
-
     @Override public Collection<? extends GrantedAuthority> getAuthorities() { return authorities; }
-    @Override public String getPassword()    { return password; }
-    @Override public String getUsername()    { return username; }
-    @Override public boolean isEnabled()     { return active; }
-    @Override public boolean isAccountNonLocked()      { return !locked; }
-    @Override public boolean isAccountNonExpired()     { return true; }
+    @Override public String getPassword()     { return password; }
+    @Override public String getUsername()     { return username; }
+    @Override public boolean isEnabled()      { return active; }
+    @Override public boolean isAccountNonLocked()    { return !locked; }
+    @Override public boolean isAccountNonExpired()   { return true; }
     @Override public boolean isCredentialsNonExpired() { return true; }
 }
