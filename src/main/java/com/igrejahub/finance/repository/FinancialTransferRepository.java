@@ -9,4 +9,5 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface FinancialTransferRepository extends BaseRepository<FinancialTransfer, Long> {
     Page<FinancialTransfer> findByOrganizationId(Long organizationId, Pageable pageable);
+    Page<FinancialTransfer> findByOrganizationIdAndChurchId(Long organizationId, Long churchId, Pageable pageable);
 }

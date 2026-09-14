@@ -23,4 +23,9 @@ public class CreateChurchRequest {
     private String logoUrl;
     private Long pastorId;
     private Long planId;
+
+    /** Nome do usuário administrador criado automaticamente para a Igreja. */
+    private String adminName;
+    /** Email do usuário administrador. Se ausente, usa o email da Igreja. */
+    private String adminEmail;
 }

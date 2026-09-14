@@ -2,6 +2,7 @@ package com.igrejahub.churches.service;
 
 import com.igrejahub.churches.dto.ChurchDto;
 import com.igrejahub.churches.dto.CreateChurchRequest;
+import com.igrejahub.churches.dto.CreateChurchResponse;
 import com.igrejahub.churches.dto.UpdateChurchRequest;
 import com.igrejahub.churches.entity.Church;
 import com.igrejahub.churches.mapper.ChurchMapper;
@@ -11,15 +12,22 @@ import com.igrejahub.common.exception.ResourceNotFoundException;
 import com.igrejahub.common.tenant.TenantContext;
 import com.igrejahub.plans.entity.Plan;
 import com.igrejahub.plans.repository.PlanRepository;
+import com.igrejahub.roles.entity.Role;
+import com.igrejahub.roles.repository.RoleRepository;
 import com.igrejahub.security.SecurityUtils;
+import com.igrejahub.users.entity.User;
+import com.igrejahub.users.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.SecureRandom;
 import java.util.List;
 
 /**
@@ -35,10 +43,18 @@ import java.util.List;
 @Transactional(readOnly = true)
 public class ChurchService {
 
+    private static final String ADMIN_PASSWORD_ALPHABET =
+        "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%";
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
     private final ChurchRepository churchRepository;
     private final ChurchMapper churchMapper;
     private final PlanRepository planRepository;
     private final SecurityUtils securityUtils;
+    private final UserRepository userRepository;
+    private final RoleRepository roleRepository;
+    private final PasswordEncoder passwordEncoder;
+    private final JdbcTemplate jdbcTemplate;
 
     // ─── Listagem com escopo ──────────────────────────────────────────────────
 
@@ -96,13 +112,25 @@ public class ChurchService {
     // ─── CRUD ─────────────────────────────────────────────────────────────────
 
     @Transactional
-    public ChurchDto createChurch(CreateChurchRequest request) {
+    public CreateChurchResponse createChurch(CreateChurchRequest request) {
         Long orgId = TenantContext.getCurrentTenant();
 
         if (request.getCnpj() != null && !request.getCnpj().isBlank()
                 && churchRepository.existsByOrganizationIdAndCnpj(orgId, request.getCnpj())) {
             throw new BusinessException("Já existe uma igreja com este CNPJ nesta organização");
         }
+
+        String adminEmail = request.getAdminEmail() != null && !request.getAdminEmail().isBlank()
+            ? request.getAdminEmail().trim()
+            : request.getEmail();
+        if (adminEmail == null || adminEmail.isBlank()) {
+            throw new BusinessException("Informe o email do administrador da Igreja (adminEmail).");
+        }
+        if (userRepository.existsByEmail(adminEmail)) {
+            throw new BusinessException("Email já cadastrado: " + adminEmail);
+        }
+        Role adminRole = roleRepository.findByName("ADMIN")
+            .orElseThrow(() -> new BusinessException("Role ADMIN não encontrada no sistema"));
 
         Plan plan = null;
         if (request.getPlanId() != null) {
@@ -125,7 +153,48 @@ public class ChurchService {
                 .status("ACTIVE")
                 .build();
         church.setOrganizationId(orgId);
-        return churchMapper.toDto(churchRepository.save(church));
+        church = churchRepository.save(church);
+
+        String adminName = request.getAdminName() != null && !request.getAdminName().isBlank()
+            ? request.getAdminName().trim()
+            : "Administrador " + church.getName();
+        String rawPassword = generateSecurePassword();
+
+        User admin = new User();
+        admin.setName(adminName);
+        admin.setEmail(adminEmail);
+        admin.setPasswordHash(passwordEncoder.encode(rawPassword));
+        admin.setOrganizationId(orgId);
+        admin.setChurchId(church.getId());
+        admin.setActive(true);
+        admin.setVerified(false);
+        admin.getRoles().add(adminRole);
+        admin = userRepository.save(admin);
+
+        jdbcTemplate.update(
+            "INSERT INTO user_church_access(user_id,church_id) VALUES(?,?) ON CONFLICT DO NOTHING",
+            admin.getId(), church.getId());
+
+        log.info("Church created: id={} name={} adminUserId={} by={}",
+            church.getId(), church.getName(), admin.getId(), TenantContext.getCurrentUserId());
+
+        return CreateChurchResponse.builder()
+            .church(churchMapper.toDto(church))
+            .admin(CreateChurchResponse.AdminCredentials.builder()
+                .name(admin.getName())
+                .email(admin.getEmail())
+                .password(rawPassword)
+                .build())
+            .message("Igreja criada com sucesso. Guarde estas credenciais — a senha não será exibida novamente.")
+            .build();
+    }
+
+    private String generateSecurePassword() {
+        StringBuilder sb = new StringBuilder(14);
+        for (int i = 0; i < 14; i++) {
+            sb.append(ADMIN_PASSWORD_ALPHABET.charAt(SECURE_RANDOM.nextInt(ADMIN_PASSWORD_ALPHABET.length())));
+        }
+        return sb.toString();
     }
 
     @Transactional
