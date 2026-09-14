@@ -12,6 +12,9 @@ import java.util.Optional;
 public interface JournalEntryRepository extends JpaRepository<JournalEntry, Long> {
     Page<JournalEntry> findByOrganizationId(Long organizationId, Pageable pageable);
     Page<JournalEntry> findByOrganizationIdAndStatus(Long organizationId, String status, Pageable pageable);
+    Page<JournalEntry> findByOrganizationIdAndChurchId(Long organizationId, Long churchId, Pageable pageable);
+    Page<JournalEntry> findByOrganizationIdAndChurchIdAndStatus(
+        Long organizationId, Long churchId, String status, Pageable pageable);
     Optional<JournalEntry> findByOrganizationIdAndId(Long organizationId, Long id);
     long countByOrganizationId(Long organizationId);
     boolean existsByOrganizationIdAndEntryNumber(Long organizationId, String entryNumber);

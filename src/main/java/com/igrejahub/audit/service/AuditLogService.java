@@ -14,6 +14,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
+import java.time.LocalDateTime;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -26,6 +28,7 @@ public class AuditLogService {
         HttpServletRequest request = getCurrentRequest();
         AuditLog auditLog = new AuditLog();
         auditLog.setOrganizationId(TenantContext.getCurrentTenant());
+        auditLog.setChurchId(TenantContext.getCurrentChurchId());
         auditLog.setUserId(securityUtils.getCurrentUserId());
         auditLog.setUserEmail(securityUtils.getCurrentUserEmail());
         auditLog.setAction(action);
@@ -43,6 +46,7 @@ public class AuditLogService {
         HttpServletRequest request = getCurrentRequest();
         AuditLog auditLog = new AuditLog();
         auditLog.setOrganizationId(TenantContext.getCurrentTenant());
+        auditLog.setChurchId(TenantContext.getCurrentChurchId());
         auditLog.setUserId(securityUtils.getCurrentUserId());
         auditLog.setUserEmail(securityUtils.getCurrentUserEmail());
         auditLog.setAction("ACCOUNTING_ACCESS_DENIED");
@@ -53,14 +57,20 @@ public class AuditLogService {
     }
 
     public Page<AuditLog> getAuditLogs(Pageable pageable, String action, Long userId) {
+        return getAuditLogs(pageable, action, userId, null, null, null);
+    }
+
+    /**
+     * Usado pela administração externa (ROOT): filtros por período, Igreja,
+     * usuário e tipo de ação. churchId só é livre para ROOT em modo global —
+     * nos demais casos é forçado para a Igreja efetiva do usuário.
+     */
+    public Page<AuditLog> getAuditLogs(Pageable pageable, String action, Long userId,
+                                        Long churchId, LocalDateTime startDate, LocalDateTime endDate) {
         Long orgId = TenantContext.getCurrentTenant();
-        if (action != null) {
-            return auditLogRepository.findByOrganizationIdAndAction(orgId, action, pageable);
-        }
-        if (userId != null) {
-            return auditLogRepository.findByOrganizationIdAndUserId(orgId, userId, pageable);
-        }
-        return auditLogRepository.findByOrganizationId(orgId, pageable);
+        Long effectiveChurchId = securityUtils.canViewAll() ? churchId : securityUtils.getEffectiveChurchId();
+        return auditLogRepository.findByFilters(
+            orgId, effectiveChurchId, userId, action, startDate, endDate, pageable);
     }
 
     private HttpServletRequest getCurrentRequest() {

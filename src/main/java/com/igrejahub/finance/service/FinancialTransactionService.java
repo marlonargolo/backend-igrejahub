@@ -1,5 +1,6 @@
 package com.igrejahub.finance.service;
 
+import com.igrejahub.audit.service.AuditLogService;
 import com.igrejahub.common.exception.BusinessException;
 import com.igrejahub.common.exception.ResourceNotFoundException;
 import com.igrejahub.common.tenant.TenantContext;
@@ -37,6 +38,7 @@ public class FinancialTransactionService {
     private final FinancialTransactionMapper     transactionMapper;
     private final SecurityUtils                  securityUtils;
     private final JdbcTemplate                   jdbcTemplate;
+    private final AuditLogService                auditLogService;
 
     // ── Listagem com filtros ───────────────────────────────────────────────────
 
@@ -165,7 +167,10 @@ public class FinancialTransactionService {
         transaction.setConfirmedAt(request != null && request.getConfirmedAt() != null
             ? request.getConfirmedAt() : LocalDate.now());
         if (request != null && request.getNotes() != null) transaction.setNotes(request.getNotes());
-        return toDtoWithRelations(transactionRepository.save(transaction));
+        transaction = transactionRepository.save(transaction);
+        auditLogService.logAction("CONFIRM_TRANSACTION", "FINANCIAL_TRANSACTION", transaction.getId(),
+            null, java.util.Map.of("amountCents", transaction.getAmountCents(), "type", transaction.getType().name()));
+        return toDtoWithRelations(transaction);
     }
 
     @Transactional
@@ -184,7 +189,10 @@ public class FinancialTransactionService {
         transaction.setCancelledAt(LocalDate.now());
         transaction.setNotes(((transaction.getNotes() != null ? transaction.getNotes() + " | " : "")
             + "Cancelado: " + request.getReason()));
-        return toDtoWithRelations(transactionRepository.save(transaction));
+        transaction = transactionRepository.save(transaction);
+        auditLogService.logAction("CANCEL_TRANSACTION", "FINANCIAL_TRANSACTION", transaction.getId(),
+            null, java.util.Map.of("reason", request.getReason()));
+        return toDtoWithRelations(transaction);
     }
 
     @Transactional

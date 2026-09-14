@@ -7,6 +7,7 @@ import com.igrejahub.churches.dto.UpdateChurchRequest;
 import com.igrejahub.churches.entity.Church;
 import com.igrejahub.churches.mapper.ChurchMapper;
 import com.igrejahub.churches.repository.ChurchRepository;
+import com.igrejahub.audit.service.AuditLogService;
 import com.igrejahub.common.exception.BusinessException;
 import com.igrejahub.common.exception.ResourceNotFoundException;
 import com.igrejahub.common.tenant.TenantContext;
@@ -55,6 +56,7 @@ public class ChurchService {
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
     private final JdbcTemplate jdbcTemplate;
+    private final AuditLogService auditLogService;
 
     // ─── Listagem com escopo ──────────────────────────────────────────────────
 
@@ -177,6 +179,8 @@ public class ChurchService {
 
         log.info("Church created: id={} name={} adminUserId={} by={}",
             church.getId(), church.getName(), admin.getId(), TenantContext.getCurrentUserId());
+        auditLogService.logAction("CREATE_CHURCH", "CHURCH", church.getId(), null,
+            java.util.Map.of("name", church.getName(), "adminEmail", admin.getEmail()));
 
         return CreateChurchResponse.builder()
             .church(churchMapper.toDto(church))

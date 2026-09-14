@@ -36,6 +36,7 @@ class FinancialTransactionServiceIsolationTest {
     @Mock private FinancialTransactionMapper transactionMapper;
     @Mock private SecurityUtils securityUtils;
     @Mock private JdbcTemplate jdbcTemplate;
+    @Mock private com.igrejahub.audit.service.AuditLogService auditLogService;
 
     private final Pageable pageable = PageRequest.of(0, 20);
 
@@ -47,7 +48,7 @@ class FinancialTransactionServiceIsolationTest {
     private FinancialTransactionService newService() {
         return new FinancialTransactionService(
             transactionRepository, categoryRepository, accountService,
-            transactionMapper, securityUtils, jdbcTemplate);
+            transactionMapper, securityUtils, jdbcTemplate, auditLogService);
     }
 
     private Long capturedCongregationId() {
