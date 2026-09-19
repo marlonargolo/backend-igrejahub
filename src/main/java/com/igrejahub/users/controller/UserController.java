@@ -20,7 +20,6 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -38,7 +37,6 @@ public class UserController {
 
     private final UserService userService;
     private final PermissionRepository permissionRepository;
-    private final JdbcTemplate jdbcTemplate;
     private final SecurityUtils securityUtils;
 
     private static final Set<String> BLOCKED_INDIVIDUAL = Set.of(
@@ -113,13 +111,17 @@ public class UserController {
     }
 
     // ── Vínculos ──────────────────────────────────────────────────────────────
+    // Acesso adicional a Igrejas/Congregações além da vinculação primária do
+    // usuário — exige a mesma permissão de transferência entre Igrejas/Congregações.
 
     @GetMapping("/{id}/churches")
+    @PreAuthorize("hasPermission(null, 'USER_VIEW')")
     public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getUserChurches(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.success(userService.getUserChurches(id)));
     }
 
     @PutMapping("/{id}/churches")
+    @PreAuthorize("hasPermission(null, 'USER_CHURCH_TRANSFER')")
     public ResponseEntity<ApiResponse<Void>> setUserChurches(
             @PathVariable Long id, @RequestBody Set<Long> churchIds) {
         userService.setUserChurches(id, churchIds);
@@ -127,11 +129,13 @@ public class UserController {
     }
 
     @GetMapping("/{id}/congregations")
+    @PreAuthorize("hasPermission(null, 'USER_VIEW')")
     public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getUserCongregations(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.success(userService.getUserCongregations(id)));
     }
 
     @PutMapping("/{id}/congregations")
+    @PreAuthorize("hasPermission(null, 'USER_CHURCH_TRANSFER')")
     public ResponseEntity<ApiResponse<Void>> setUserCongregations(
             @PathVariable Long id, @RequestBody Set<Long> congregationIds) {
         userService.setUserCongregations(id, congregationIds);
@@ -169,29 +173,14 @@ public class UserController {
     @GetMapping("/{id}/permissions")
     @PreAuthorize("hasPermission(null, 'USER_ROLE_MANAGE')")
     public ResponseEntity<ApiResponse<List<String>>> getUserPermissions(@PathVariable Long id) {
-        List<String> perms = jdbcTemplate.queryForList(
-            "SELECT p.name FROM permissions p " +
-            "JOIN user_permissions up ON p.id = up.permission_id WHERE up.user_id = ?",
-            String.class, id);
-        return ResponseEntity.ok(ApiResponse.success(perms));
+        return ResponseEntity.ok(ApiResponse.success(userService.getUserPermissions(id)));
     }
 
     @PutMapping("/{id}/permissions")
     @PreAuthorize("hasPermission(null, 'USER_ROLE_MANAGE')")
     public ResponseEntity<ApiResponse<Void>> setUserPermissions(
             @PathVariable Long id, @RequestBody Set<String> permissionNames) {
-        Long grantedBy = securityUtils.getCurrentUserId();
-        boolean isRoot = securityUtils.isRoot();
-        Set<String> toGrant = permissionNames.stream()
-            .filter(n -> isRoot || !BLOCKED_INDIVIDUAL.contains(n))
-            .collect(Collectors.toSet());
-        jdbcTemplate.update("DELETE FROM user_permissions WHERE user_id = ?", id);
-        for (String name : toGrant) {
-            permissionRepository.findByName(name).ifPresent(p ->
-                jdbcTemplate.update(
-                    "INSERT INTO user_permissions(user_id,permission_id,granted_by) VALUES(?,?,?) ON CONFLICT DO NOTHING",
-                    id, p.getId(), grantedBy));
-        }
+        userService.setUserPermissions(id, permissionNames);
         return ResponseEntity.ok(ApiResponse.success());
     }
 }

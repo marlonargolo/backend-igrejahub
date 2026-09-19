@@ -31,4 +31,5 @@ public class CreateUserRequest {
     private Boolean active;
     private String roleName;  // Alternativa a roleIds — aceita nome do role (ADMIN, TESOUREIRO, etc.)
     private Long churchId;    // Igreja vinculada ao usuário
+    private Long congregationId; // Congregação vinculada ao usuário (opcional)
 }
