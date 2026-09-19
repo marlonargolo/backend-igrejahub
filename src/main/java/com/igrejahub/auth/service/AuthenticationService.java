@@ -8,6 +8,7 @@ import com.igrejahub.organizations.repository.OrganizationRepository;
 import com.igrejahub.roles.repository.RoleRepository;
 import com.igrejahub.security.JwtService;
 import com.igrejahub.security.UserPrincipal;
+import com.igrejahub.security.service.CustomUserDetailsService;
 import com.igrejahub.security.service.RateLimitingService;
 import com.igrejahub.security.service.TokenBlacklistService;
 import com.igrejahub.users.entity.User;
@@ -41,6 +42,7 @@ public class AuthenticationService {
     private final ApplicationProperties appProperties;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
+    private final CustomUserDetailsService userDetailsService;
 
     private static final int MAX_FAILED_ATTEMPTS  = 5;
     private static final int LOCK_DURATION_MINUTES = 15;
@@ -65,12 +67,12 @@ public class AuthenticationService {
             userRepository.save(user);
             rateLimitingService.resetAttempts(ip);
 
-            // Reconstruir UserPrincipal do banco para garantir churchId/congregationId atualizados
-            UserPrincipal principalWithScope = new UserPrincipal(user);
+            // Reconstruir UserPrincipal do banco com permissões mescladas (role + individuais)
+            UserPrincipal principalWithScope = (UserPrincipal) userDetailsService.loadUserByUsername(user.getEmail());
             String accessToken  = jwtService.generateAccessToken(principalWithScope);
             String refreshToken = jwtService.generateRefreshToken(principalWithScope);
 
-            return buildLoginResponse(user, accessToken, refreshToken);
+            return buildLoginResponse(user, principalWithScope, accessToken, refreshToken);
 
         } catch (BadCredentialsException e) {
             handleFailedLogin(request.getEmail(), ip);
@@ -97,7 +99,7 @@ public class AuthenticationService {
             .orElseThrow(() -> new BusinessException("Usuário não encontrado"));
         if (!user.isActive()) throw new BusinessException("Usuário inativo");
 
-        UserPrincipal userPrincipal = new UserPrincipal(user);
+        UserPrincipal userPrincipal = (UserPrincipal) userDetailsService.loadUserByUsername(user.getEmail());
         String newAccessToken  = jwtService.generateAccessToken(userPrincipal);
         String newRefreshToken = jwtService.generateRefreshToken(userPrincipal);
 
@@ -147,10 +149,10 @@ public class AuthenticationService {
         roleRepository.findByName("ADMIN").ifPresent(user.getRoles()::add);
         user = userRepository.save(user);
 
-        UserPrincipal userPrincipal = new UserPrincipal(user);
+        UserPrincipal userPrincipal = (UserPrincipal) userDetailsService.loadUserByUsername(user.getEmail());
         String accessToken  = jwtService.generateAccessToken(userPrincipal);
         String refreshToken = jwtService.generateRefreshToken(userPrincipal);
-        return buildLoginResponse(user, accessToken, refreshToken);
+        return buildLoginResponse(user, userPrincipal, accessToken, refreshToken);
     }
 
     @Transactional
@@ -179,7 +181,8 @@ public class AuthenticationService {
         });
     }
 
-    private LoginResponse buildLoginResponse(User user, String accessToken, String refreshToken) {
+    private LoginResponse buildLoginResponse(User user, UserPrincipal principal,
+                                              String accessToken, String refreshToken) {
         Organization organization = organizationRepository.findById(user.getOrganizationId()).orElse(null);
 
         UserInfoDto userInfo = UserInfoDto.builder()
@@ -193,10 +196,8 @@ public class AuthenticationService {
             .roles(user.getRoles().stream()
                 .map(r -> r.getName())
                 .collect(Collectors.toSet()))
-            .permissions(user.getRoles().stream()
-                .flatMap(r -> r.getPermissions().stream())
-                .map(p -> p.getName())
-                .collect(Collectors.toSet()))
+            // Mescla permissões da role com permissões individuais (user_permissions)
+            .permissions(principal.getPermissions())
             .build();
 
         return LoginResponse.builder()

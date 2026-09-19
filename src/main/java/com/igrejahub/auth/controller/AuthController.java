@@ -8,6 +8,7 @@ import com.igrejahub.common.exception.ResourceNotFoundException;
 import com.igrejahub.organizations.entity.Organization;
 import com.igrejahub.organizations.repository.OrganizationRepository;
 import com.igrejahub.security.UserPrincipal;
+import com.igrejahub.security.service.CustomUserDetailsService;
 import com.igrejahub.users.entity.User;
 import com.igrejahub.users.repository.UserRepository;
 import io.swagger.v3.oas.annotations.Operation;
@@ -32,6 +33,7 @@ public class AuthController {
     private final EmailVerificationService emailVerificationService;
     private final UserRepository userRepository;
     private final OrganizationRepository organizationRepository;
+    private final CustomUserDetailsService userDetailsService;
 
     @Operation(summary = "Login")
     @PostMapping("/login")
@@ -75,19 +77,21 @@ public class AuthController {
         Organization organization = organizationRepository
             .findById(user.getOrganizationId()).orElse(null);
 
+        // Mescla permissões da role com permissões individuais (user_permissions)
+        UserPrincipal merged = (UserPrincipal) userDetailsService.loadUserByUsername(user.getEmail());
+
         UserInfoDto dto = UserInfoDto.builder()
             .id(user.getId())
             .name(user.getName())
             .email(user.getEmail())
             .organizationId(user.getOrganizationId())
             .organizationName(organization != null ? organization.getName() : null)
+            .churchId(user.getChurchId())
+            .congregationId(user.getCongregationId())
             .roles(user.getRoles().stream()
                 .map(r -> r.getName())
                 .collect(Collectors.toSet()))
-            .permissions(user.getRoles().stream()
-                .flatMap(r -> r.getPermissions().stream())
-                .map(p -> p.getName())
-                .collect(Collectors.toSet()))
+            .permissions(merged.getPermissions())
             .build();
 
         return ResponseEntity.ok(ApiResponse.success(dto));

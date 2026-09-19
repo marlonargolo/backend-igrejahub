@@ -25,7 +25,7 @@ public class UserPrincipal implements UserDetails {
     private final boolean active;
     private final boolean locked;
     private final Set<GrantedAuthority> authorities;
-    private final Set<String> permissions;
+    private Set<String> permissions;
 
     public UserPrincipal(User user) {
         this.id             = user.getId();
@@ -57,12 +57,15 @@ public class UserPrincipal implements UserDetails {
             : new HashSet<>();
     }
 
-    /** Construtor com permissões pré-mescladas (usado pelo CustomUserDetailsService). */
+    /**
+     * Construtor com permissões pré-mescladas (usado pelo CustomUserDetailsService
+     * para combinar permissões da role com permissões individuais do usuário).
+     */
     public UserPrincipal(User user, Set<String> mergedPermissions) {
         this(user);
-        // mergedPermissions sobrescreve o campo final — usa trick de campo mutable wrapper
-        // Para manter compatibilidade sem alterar a estrutura: ignora o parâmetro extra
-        // Os serviços que usam este construtor devem ser ajustados para usar o construtor principal.
+        if (mergedPermissions != null) {
+            this.permissions = mergedPermissions;
+        }
     }
 
     public UserPrincipal(Long id, String name, String email, String password,
