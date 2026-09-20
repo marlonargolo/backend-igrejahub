@@ -37,12 +37,14 @@ public class CongregationService {
     public Page<CongregationDto> getCongregations(Pageable pageable, Long churchIdParam, String search) {
         Long orgId             = TenantContext.getCurrentTenant();
         Long effectiveChurchId = securityUtils.getEffectiveChurchId();
+        boolean viewAll        = securityUtils.canViewAll();
 
-        // Parâmetro churchId do request tem prioridade sobre o contexto
-        Long filterChurchId = churchIdParam != null ? churchIdParam : effectiveChurchId;
+        // Parâmetro churchId do request só pode sobrescrever o contexto para
+        // ROOT em modo global — qualquer outro usuário fica preso à própria Igreja.
+        Long filterChurchId = (viewAll && churchIdParam != null) ? churchIdParam : effectiveChurchId;
 
         // ROOT modo global sem churchIdParam → vê todas
-        if (securityUtils.canViewAll() && churchIdParam == null) {
+        if (viewAll && churchIdParam == null) {
             return search != null && !search.isEmpty()
                 ? congregationRepository
                     .findByOrganizationIdAndNameContainingIgnoreCase(orgId, search, pageable)
