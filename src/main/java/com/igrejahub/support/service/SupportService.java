@@ -77,8 +77,8 @@ public class SupportService {
                 .stream().map(this::toDto).collect(Collectors.toList());
         }
 
-        // Pastor de Congregação → só da sua congregação
-        if (congId != null && !securityUtils.isRoot()) {
+        // Pastor de Congregação, ou ROOT/admin que "entrou" numa Congregação → só dela
+        if (congId != null) {
             return ticketRepo.findByOrganizationIdAndCongregationId(orgId, congId)
                 .stream().map(this::toDto).collect(Collectors.toList());
         }
@@ -183,8 +183,8 @@ public class SupportService {
         }
         if (securityUtils.canViewAll()) return;
 
-        // Pastor de Congregação
-        if (congId != null && !securityUtils.isRoot()) {
+        // Pastor de Congregação, ou ROOT/admin dentro de uma Congregação
+        if (congId != null) {
             if (t.getCongregationId() == null || !t.getCongregationId().equals(congId)) {
                 throw new BusinessException("Você não tem acesso a este chamado.");
             }

@@ -28,7 +28,7 @@ public class FinancialSummaryService {
     public FinancialSummaryDto getSummary(LocalDate startDate, LocalDate endDate) {
         Long orgId    = TenantContext.getCurrentTenant();
         Long churchId = securityUtils.canViewAll() ? null : securityUtils.getEffectiveChurchId();
-        Long congId   = !securityUtils.isRoot() ? TenantContext.getCurrentCongregationId() : null;
+        Long congId   = TenantContext.getCurrentCongregationId();
 
         LocalDate start = startDate != null ? startDate : LocalDate.now().withDayOfMonth(1);
         LocalDate end   = endDate   != null ? endDate   : LocalDate.now();
