@@ -36,7 +36,6 @@ class FinancialSummaryServiceIsolationTest {
         TenantContext.setCurrentTenant(1L);
         TenantContext.setCurrentCongregationId(null);
         when(securityUtils.canViewAll()).thenReturn(false);
-        when(securityUtils.isRoot()).thenReturn(false);
         when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
         when(transactionRepository.sumConfirmedByCategoryAndPeriod(any(), any(), any(), any()))
             .thenReturn(List.of());
@@ -54,7 +53,6 @@ class FinancialSummaryServiceIsolationTest {
         TenantContext.setCurrentTenant(1L);
         TenantContext.setCurrentCongregationId(100L);
         when(securityUtils.canViewAll()).thenReturn(false);
-        when(securityUtils.isRoot()).thenReturn(false);
         when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
         when(transactionRepository.sumConfirmedByCategoryAndPeriod(any(), any(), any(), any()))
             .thenReturn(List.of());
@@ -72,7 +70,6 @@ class FinancialSummaryServiceIsolationTest {
         TenantContext.setCurrentTenant(1L);
         TenantContext.setCurrentCongregationId(null);
         when(securityUtils.canViewAll()).thenReturn(true);
-        when(securityUtils.isRoot()).thenReturn(true);
         when(transactionRepository.sumConfirmedByCategoryAndPeriod(any(), any(), any(), any()))
             .thenReturn(List.of());
 
@@ -80,5 +77,24 @@ class FinancialSummaryServiceIsolationTest {
 
         verify(transactionRepository).sumConfirmedRevenueCentsByFilter(
             eq(1L), any(), any(), isNull(), isNull());
+    }
+
+    @Test
+    void getSummary_rootInsideChurchAndCongregation_filtersByThatCongregationToo() {
+        // ROOT que entrou numa Igreja e depois numa Congregação: o resumo
+        // financeiro precisa ficar restrito à Congregação, igual a qualquer
+        // outro usuário nesse mesmo contexto — dados da Igreja não podem
+        // aparecer dentro da Congregação, mesmo para ROOT.
+        TenantContext.setCurrentTenant(1L);
+        TenantContext.setCurrentCongregationId(100L);
+        when(securityUtils.canViewAll()).thenReturn(false);
+        when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
+        when(transactionRepository.sumConfirmedByCategoryAndPeriod(any(), any(), any(), any()))
+            .thenReturn(List.of());
+
+        newService().getSummary(LocalDate.now().minusDays(30), LocalDate.now());
+
+        verify(transactionRepository).sumConfirmedRevenueCentsByFilter(
+            eq(1L), any(), any(), eq(10L), eq(100L));
     }
 }

@@ -68,8 +68,8 @@ public class AssetService {
         Long churchId = securityUtils.getEffectiveChurchId();
         Long congId   = TenantContext.getCurrentCongregationId();
 
-        // Pastor de Congregação → só da sua congregação
-        if (congId != null && !securityUtils.isRoot()) {
+        // Pastor de Congregação, ou ROOT/admin que "entrou" numa Congregação → só dela
+        if (congId != null) {
             return assetRepository.findByCongregationId(orgId, congId, categoryId, status, s, pageable)
                 .map(a -> toDto(a, orgId));
         }
@@ -127,8 +127,8 @@ public class AssetService {
         Long callerCongId   = TenantContext.getCurrentCongregationId();
         Long targetCongId   = request.getCongregationId();
 
-        if (callerCongId != null && !securityUtils.isRoot()) {
-            // Pastor de Congregação: forçado para a sua congregação
+        if (callerCongId != null) {
+            // Pastor de Congregação, ou ROOT/admin dentro de uma Congregação: forçado para ela
             if (targetCongId != null && !targetCongId.equals(callerCongId)) {
                 throw new BusinessException("Você só pode criar bens na sua congregação.");
             }

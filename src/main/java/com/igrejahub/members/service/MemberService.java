@@ -47,8 +47,8 @@ public class MemberService {
                 .map(this::toDto);
         }
 
-        // Pastor de Congregação → só da sua congregação
-        if (effCongId != null && !securityUtils.isRoot()) {
+        // Pastor de Congregação, ou ROOT/admin que "entrou" numa Congregação → só dela
+        if (effCongId != null) {
             return memberRepository.findByCongregationId(orgId, effCongId, status, s, pageable)
                 .map(this::toDto);
         }
@@ -107,8 +107,8 @@ public class MemberService {
         // Congregação deve pertencer à Igreja
         Long targetCongId = request.getCongregationId();
         Long effCongId    = TenantContext.getCurrentCongregationId();
-        if (effCongId != null && !securityUtils.isRoot()) {
-            // Pastor de Congregação: forçar para a sua congregação
+        if (effCongId != null) {
+            // Pastor de Congregação, ou ROOT/admin dentro de uma Congregação: forçar para ela
             targetCongId = effCongId;
         } else if (targetCongId != null
                 && congregationRepository.findByOrganizationIdAndId(organizationId, targetCongId).isEmpty()) {

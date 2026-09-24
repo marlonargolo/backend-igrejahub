@@ -54,7 +54,7 @@ public class DocumentController {
         Page<IgrejaDocument> page;
         if (securityUtils.canViewAll()) {
             page = documentRepository.findByOrganizationIdAndDeletedFalse(orgId, pageable);
-        } else if (congId != null && !securityUtils.isRoot()) {
+        } else if (congId != null) {
             page = documentRepository.findForCongregation(orgId, churchId, congId, pageable);
         } else if (churchId != null) {
             page = documentRepository.findByOrganizationIdAndChurchId(orgId, churchId, pageable);
