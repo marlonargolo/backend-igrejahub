@@ -53,9 +53,11 @@ public class TenantIsolationFilter extends OncePerRequestFilter {
                 String churchIdHdr = request.getHeader("X-Church-Id");
                 boolean global     = !"filtered".equalsIgnoreCase(rootMode);
 
+                Long resolvedChurchId = null;
                 if (!global && churchIdHdr != null && !churchIdHdr.isBlank()) {
                     try {
-                        TenantContext.setCurrentChurchId(Long.parseLong(churchIdHdr.trim()));
+                        resolvedChurchId = Long.parseLong(churchIdHdr.trim());
+                        TenantContext.setCurrentChurchId(resolvedChurchId);
                         TenantContext.setRootGlobalMode(false);
                     } catch (NumberFormatException e) {
                         TenantContext.setCurrentChurchId(null);
@@ -65,7 +67,14 @@ public class TenantIsolationFilter extends OncePerRequestFilter {
                     TenantContext.setCurrentChurchId(null);
                     TenantContext.setRootGlobalMode(true);
                 }
-                TenantContext.setCurrentCongregationId(null);
+
+                // ROOT também pode "entrar" numa Congregação específica da Igreja
+                // que está gerenciando no momento (mesmo mecanismo do admin de
+                // Igreja, um nível acima). Sem isso, todo módulo (Membros,
+                // Patrimônio, etc.) continuava filtrando só por churchId e
+                // devolvia os dados da Igreja inteira dentro da Congregação.
+                TenantContext.setCurrentCongregationId(
+                    resolveEnteredCongregationId(request, user.getOrganizationId(), resolvedChurchId));
 
             } else {
                 // Não-ROOT: usa os campos do UserPrincipal (que agora existem)
@@ -78,7 +87,7 @@ public class TenantIsolationFilter extends OncePerRequestFilter {
                     TenantContext.setCurrentCongregationId(user.getCongregationId());
                 } else {
                     TenantContext.setCurrentCongregationId(
-                        resolveEnteredCongregationId(request, user));
+                        resolveEnteredCongregationId(request, user.getOrganizationId(), user.getChurchId()));
                 }
             }
         }
@@ -91,21 +100,23 @@ public class TenantIsolationFilter extends OncePerRequestFilter {
     }
 
     /**
-     * Admin de Igreja "entrando" numa Congregação específica via header.
-     * Só é aplicado se a Congregação pertencer à Igreja do próprio usuário —
-     * caso contrário, ou se o header estiver ausente/ inválido, retorna null
-     * (visão da Igreja toda, comportamento padrão de sempre).
+     * "Entrar" numa Congregação específica via header — usado tanto pelo admin
+     * de Igreja (churchId fixo no JWT) quanto pelo ROOT (churchId resolvido a
+     * partir do header X-Church-Id). Só é aplicado se a Congregação pertencer
+     * à própria Igreja em questão — caso contrário, ou se o header estiver
+     * ausente/inválido, ou não houver Igreja definida, retorna null (visão da
+     * Igreja toda, comportamento padrão de sempre).
      */
-    private Long resolveEnteredCongregationId(HttpServletRequest request, UserPrincipal user) {
+    private Long resolveEnteredCongregationId(HttpServletRequest request, Long organizationId, Long churchId) {
         String header = request.getHeader("X-Congregation-Id");
-        if (header == null || header.isBlank() || user.getChurchId() == null) {
+        if (header == null || header.isBlank() || churchId == null) {
             return null;
         }
         try {
             Long requestedCongId = Long.parseLong(header.trim());
-            boolean belongsToOwnChurch = congregationRepository.existsByOrganizationIdAndIdAndChurchId(
-                user.getOrganizationId(), requestedCongId, user.getChurchId());
-            return belongsToOwnChurch ? requestedCongId : null;
+            boolean belongsToChurch = congregationRepository.existsByOrganizationIdAndIdAndChurchId(
+                organizationId, requestedCongId, churchId);
+            return belongsToChurch ? requestedCongId : null;
         } catch (NumberFormatException e) {
             return null;
         }
