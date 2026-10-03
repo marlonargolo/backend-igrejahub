@@ -9,6 +9,7 @@ import com.igrejahub.finance.repository.FinancialTransactionRepository;
 import com.igrejahub.members.repository.MemberRepository;
 import com.igrejahub.common.tenant.TenantContext;
 import com.igrejahub.security.SecurityUtils;
+import com.igrejahub.users.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,6 +27,7 @@ public class DashboardService {
     private final CongregationRepository congregationRepository;
     private final FinancialTransactionRepository transactionRepository;
     private final SecurityUtils securityUtils;
+    private final UserRepository userRepository;
 
     public DashboardMetrics getDashboardMetrics(DashboardFilterDto filter) {
         Long orgId = TenantContext.getCurrentTenant();
@@ -75,6 +77,10 @@ public class DashboardService {
         long pendingTransactions = transactionRepository.countByFilter(
                 orgId, com.igrejahub.finance.entity.FinancialTransaction.TransactionStatus.PENDING, churchId, congregationId);
 
+        long activeUsers = viewAll
+            ? userRepository.countByOrganizationIdAndActive(orgId, true)
+            : userRepository.countActiveByFilter(orgId, churchId, congregationId);
+
         return DashboardMetrics.builder()
                 .totalMembers(totalMembers)
                 .totalChurches(totalChurches)
@@ -83,7 +89,7 @@ public class DashboardService {
                 .monthlyExpenses(monthlyExpenses)
                 .balance(monthlyRevenue.subtract(monthlyExpenses))
                 .totalAssets(0L)
-                .activeUsers(1L)
+                .activeUsers(activeUsers)
                 .pendingTransactions(pendingTransactions)
                 .build();
     }
