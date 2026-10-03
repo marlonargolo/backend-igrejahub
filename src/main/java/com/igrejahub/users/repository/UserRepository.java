@@ -22,6 +22,13 @@ public interface UserRepository extends BaseRepository<User, Long> {
     boolean existsByEmail(String email);
     long countByOrganizationIdAndActive(Long organizationId, boolean active);
 
+    @Query("SELECT COUNT(u) FROM User u WHERE u.organizationId = :orgId AND u.active = true " +
+           "AND (:churchId IS NULL OR u.churchId = :churchId) " +
+           "AND (:congregationId IS NULL OR u.congregationId = :congregationId)")
+    long countActiveByFilter(@Param("orgId") Long orgId,
+                             @Param("churchId") Long churchId,
+                             @Param("congregationId") Long congregationId);
+
     // ── Por Igreja ────────────────────────────────────────────────────────────
     Page<User> findByOrganizationIdAndChurchId(Long organizationId, Long churchId, Pageable pageable);
 

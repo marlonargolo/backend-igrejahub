@@ -7,6 +7,7 @@ import com.igrejahub.dashboard.dto.DashboardFilterDto;
 import com.igrejahub.finance.repository.FinancialTransactionRepository;
 import com.igrejahub.members.repository.MemberRepository;
 import com.igrejahub.security.SecurityUtils;
+import com.igrejahub.users.repository.UserRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -38,13 +39,14 @@ class DashboardServiceIsolationTest {
     @Mock private CongregationRepository congregationRepository;
     @Mock private FinancialTransactionRepository transactionRepository;
     @Mock private SecurityUtils securityUtils;
+    @Mock private UserRepository userRepository;
 
     @AfterEach
     void clearContext() { TenantContext.clear(); }
 
     private DashboardService newService() {
         return new DashboardService(memberRepository, churchRepository, congregationRepository,
-            transactionRepository, securityUtils);
+            transactionRepository, securityUtils, userRepository);
     }
 
     @Test
@@ -113,5 +115,29 @@ class DashboardServiceIsolationTest {
         newService().getDashboardMetrics(filter);
 
         verify(memberRepository).countByFilter(any(), any(), eq(20L), eq(200L));
+    }
+
+    @Test
+    void activeUsers_isRealCount_notHardcoded() {
+        TenantContext.setCurrentTenant(1L);
+        TenantContext.setCurrentCongregationId(null);
+        when(securityUtils.canViewAll()).thenReturn(false);
+        when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
+        when(userRepository.countActiveByFilter(1L, 10L, null)).thenReturn(37L);
+
+        var metrics = newService().getDashboardMetrics(DashboardFilterDto.builder().build());
+
+        assertEquals(37L, metrics.getActiveUsers(), "contador de usuários ativos precisa refletir a contagem real");
+    }
+
+    @Test
+    void activeUsers_rootGlobal_countsWholeOrganization() {
+        TenantContext.setCurrentTenant(1L);
+        when(securityUtils.canViewAll()).thenReturn(true);
+        when(userRepository.countByOrganizationIdAndActive(1L, true)).thenReturn(52L);
+
+        var metrics = newService().getDashboardMetrics(DashboardFilterDto.builder().build());
+
+        assertEquals(52L, metrics.getActiveUsers());
     }
 }
