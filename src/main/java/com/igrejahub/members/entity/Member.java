@@ -82,5 +82,5 @@ public class Member extends BaseEntity {
 
     @Column(name = "status", length = 20)
     @Builder.Default
-    private String status = "ACTIVE";
+    private String status = "ATIVO";
 }

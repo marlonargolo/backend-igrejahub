@@ -97,6 +97,23 @@ public class MemberController {
         return ResponseEntity.ok(ApiResponse.success());
     }
 
+    @Operation(summary = "Histórico de alterações do membro")
+    @GetMapping("/{id}/history")
+    @PreAuthorize("hasPermission(null, 'MEMBER_VIEW')")
+    public ResponseEntity<ApiResponse<PaginatedResponse<com.igrejahub.audit.entity.AuditLog>>> getMemberHistory(
+            @PathVariable Long id,
+            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
+        Page<com.igrejahub.audit.entity.AuditLog> page = memberService.getMemberHistory(id, pageable);
+        PaginatedResponse<com.igrejahub.audit.entity.AuditLog> response =
+            PaginatedResponse.<com.igrejahub.audit.entity.AuditLog>builder()
+                .data(page.getContent())
+                .meta(PaginatedResponse.PaginationMeta.builder()
+                    .page(page.getNumber() + 1).pageSize(page.getSize())
+                    .total(page.getTotalElements()).totalPages(page.getTotalPages()).build())
+                .build();
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
     private final MemberOccurrenceService occurrenceService;
 
     @GetMapping("/{id}/occurrences")

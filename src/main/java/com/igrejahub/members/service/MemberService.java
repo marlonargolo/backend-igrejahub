@@ -1,5 +1,8 @@
 package com.igrejahub.members.service;
 
+import com.igrejahub.audit.entity.AuditLog;
+import com.igrejahub.audit.repository.AuditLogRepository;
+import com.igrejahub.audit.service.AuditLogService;
 import com.igrejahub.churches.repository.ChurchRepository;
 import com.igrejahub.common.exception.BusinessException;
 import com.igrejahub.common.exception.ResourceNotFoundException;
@@ -19,6 +22,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.Map;
+import java.util.Objects;
 
 @Slf4j
 @Service
@@ -30,6 +35,8 @@ public class MemberService {
     private final ChurchRepository       churchRepository;
     private final CongregationRepository congregationRepository;
     private final SecurityUtils          securityUtils;
+    private final AuditLogService        auditLogService;
+    private final AuditLogRepository     auditLogRepository;
 
     public Page<MemberDto> getMembers(Pageable pageable, Long churchIdParam,
                                       Long congregationId, String status, String search) {
@@ -150,7 +157,7 @@ public class MemberService {
         member.setCargo(request.getCargo());
         member.setFuncoes(request.getFuncoes());
         member.setRole(request.getCargo());
-        member.setStatus("ACTIVE");
+        member.setStatus("ATIVO");
 
         member = memberRepository.save(member);
         log.info("Member created: {} churchId={} congregationId={} by={}",
@@ -181,8 +188,14 @@ public class MemberService {
         if (request.getNotes()         != null) member.setNotes(request.getNotes());
         if (request.getCargo()         != null) { member.setCargo(request.getCargo()); member.setRole(request.getCargo()); }
         if (request.getFuncoes()       != null) member.setFuncoes(request.getFuncoes());
-        if (request.getStatus()        != null) member.setStatus(request.getStatus());
         if (request.getCongregationId() != null) member.setCongregationId(request.getCongregationId());
+
+        if (request.getStatus() != null && !Objects.equals(request.getStatus(), member.getStatus())) {
+            String oldStatus = member.getStatus();
+            member.setStatus(request.getStatus());
+            auditLogService.logAction("UPDATE_MEMBER_STATUS", "MEMBER", id,
+                Map.of("status", oldStatus), Map.of("status", request.getStatus()));
+        }
 
         return toDto(memberRepository.save(member));
     }
@@ -195,8 +208,19 @@ public class MemberService {
         if (!member.getOrganizationId().equals(organizationId)) {
             throw new BusinessException("Acesso não autorizado");
         }
-        member.setStatus("INACTIVE");
+        String oldStatus = member.getStatus();
+        member.setStatus("INATIVO");
         memberRepository.save(member);
+        auditLogService.logAction("UPDATE_MEMBER_STATUS", "MEMBER", id,
+            Map.of("status", oldStatus), Map.of("status", "INATIVO"));
+    }
+
+    /** Histórico de alterações do membro (ex.: mudanças de status), via log de auditoria. */
+    public Page<AuditLog> getMemberHistory(Long id, Pageable pageable) {
+        getMember(id); // reaproveita as mesmas checagens de escopo/isolamento
+        Long organizationId = TenantContext.getCurrentTenant();
+        return auditLogRepository.findByOrganizationIdAndEntityTypeAndEntityIdOrderByCreatedAtDesc(
+            organizationId, "MEMBER", id, pageable);
     }
 
     private MemberDto toDto(Member entity) {

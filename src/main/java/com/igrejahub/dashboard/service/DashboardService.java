@@ -71,7 +71,7 @@ public class DashboardService {
             }
         }
 
-        long totalMembers = memberRepository.countByFilter(orgId, "ACTIVE", churchId, congregationId);
+        long totalMembers = memberRepository.countByFilter(orgId, "ATIVO", churchId, congregationId);
         long totalChurches = viewAll
             ? churchRepository.countByOrganizationIdAndStatus(orgId, "ACTIVE")
             : 1L;
