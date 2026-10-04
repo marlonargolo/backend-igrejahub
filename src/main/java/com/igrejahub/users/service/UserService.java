@@ -332,6 +332,12 @@ public class UserService {
         auditLogService.logAction("SET_USER_CONGREGATIONS", "USER", userId, null, congregationIds);
     }
 
+    /** Sem checagem de escopo — usado só por /auth/me, para o próprio usuário saber suas congregações vinculadas. */
+    public List<Long> getOwnLinkedCongregationIds(Long userId) {
+        return jdbcTemplate.queryForList(
+            "SELECT congregation_id FROM user_congregation_access WHERE user_id = ?", Long.class, userId);
+    }
+
     public boolean getAccessMainChurch(Long userId) {
         return getManageableUser(userId).isAccessMainChurch();
     }
