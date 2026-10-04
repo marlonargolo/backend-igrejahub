@@ -6,6 +6,7 @@ import lombok.*;
 public class FinancialAccountDto {
     private Long id;
     private Long churchId;
+    private String churchName;
     private String name;
     private String type;
     private String bankName;

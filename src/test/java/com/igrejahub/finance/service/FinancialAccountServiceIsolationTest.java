@@ -1,5 +1,6 @@
 package com.igrejahub.finance.service;
 
+import com.igrejahub.churches.repository.ChurchRepository;
 import com.igrejahub.common.exception.BusinessException;
 import com.igrejahub.common.tenant.TenantContext;
 import com.igrejahub.finance.entity.FinancialAccount;
@@ -27,6 +28,7 @@ class FinancialAccountServiceIsolationTest {
     @Mock private FinancialAccountRepository accountRepository;
     @Mock private FinancialAccountMapper accountMapper;
     @Mock private SecurityUtils securityUtils;
+    @Mock private ChurchRepository churchRepository;
 
     private final Pageable pageable = PageRequest.of(0, 20);
 
@@ -34,7 +36,7 @@ class FinancialAccountServiceIsolationTest {
     void clearContext() { TenantContext.clear(); }
 
     private FinancialAccountService newService() {
-        return new FinancialAccountService(accountRepository, accountMapper, securityUtils);
+        return new FinancialAccountService(accountRepository, accountMapper, securityUtils, churchRepository);
     }
 
     @Test

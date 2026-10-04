@@ -1,5 +1,6 @@
 package com.igrejahub.finance.service;
 
+import com.igrejahub.churches.repository.ChurchRepository;
 import com.igrejahub.common.exception.BusinessException;
 import com.igrejahub.common.exception.ResourceNotFoundException;
 import com.igrejahub.common.tenant.TenantContext;
@@ -30,6 +31,7 @@ public class FinancialAccountService {
     private final FinancialAccountRepository accountRepository;
     private final FinancialAccountMapper     accountMapper;
     private final SecurityUtils              securityUtils;
+    private final ChurchRepository           churchRepository;
 
     public Page<FinancialAccountDto> getAccounts(Pageable pageable) {
         Long orgId    = TenantContext.getCurrentTenant();
@@ -38,13 +40,13 @@ public class FinancialAccountService {
         // ROOT global → tudo
         if (securityUtils.canViewAll()) {
             return accountRepository.findByOrganizationId(orgId, pageable)
-                .map(accountMapper::toDto);
+                .map(accountMapper::toDto).map(this::withChurchName);
         }
 
         // Demais → só da Igreja
         if (churchId == null) return Page.empty(pageable);
         return accountRepository.findByOrganizationIdAndChurchId(orgId, churchId, pageable)
-            .map(accountMapper::toDto);
+            .map(accountMapper::toDto).map(this::withChurchName);
     }
 
     public List<FinancialAccountDto> getActiveAccounts() {
@@ -53,16 +55,24 @@ public class FinancialAccountService {
 
         if (securityUtils.canViewAll()) {
             return accountRepository.findByOrganizationIdAndActiveTrue(orgId)
-                .stream().map(accountMapper::toDto).toList();
+                .stream().map(accountMapper::toDto).map(this::withChurchName).toList();
         }
 
         if (churchId == null) return List.of();
         return accountRepository.findByOrganizationIdAndChurchIdAndActiveTrue(orgId, churchId)
-            .stream().map(accountMapper::toDto).toList();
+            .stream().map(accountMapper::toDto).map(this::withChurchName).toList();
     }
 
     public FinancialAccountDto getAccount(Long id) {
-        return accountMapper.toDto(getOwnedAccount(id));
+        return withChurchName(accountMapper.toDto(getOwnedAccount(id)));
+    }
+
+    /** Identifica visualmente a Igreja de cada conta (útil para ROOT, que vê contas de várias Igrejas juntas). */
+    private FinancialAccountDto withChurchName(FinancialAccountDto dto) {
+        if (dto.getChurchId() != null) {
+            churchRepository.findById(dto.getChurchId()).ifPresent(c -> dto.setChurchName(c.getName()));
+        }
+        return dto;
     }
 
     @Transactional
