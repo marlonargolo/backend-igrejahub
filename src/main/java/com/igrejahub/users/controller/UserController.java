@@ -7,6 +7,7 @@ import com.igrejahub.permissions.repository.PermissionRepository;
 import com.igrejahub.security.SecurityUtils;
 import com.igrejahub.users.dto.ChangePasswordRequest;
 import com.igrejahub.users.dto.CreateUserRequest;
+import com.igrejahub.users.dto.ResetPasswordRequest;
 import com.igrejahub.users.dto.UpdateUserRequest;
 import com.igrejahub.users.dto.UserDto;
 import com.igrejahub.users.service.UserService;
@@ -108,6 +109,22 @@ public class UserController {
     public ResponseEntity<ApiResponse<Void>> changePassword(@Valid @RequestBody ChangePasswordRequest request) {
         userService.changePassword(request);
         return ResponseEntity.ok(ApiResponse.success());
+    }
+
+    /**
+     * Admin redefine a senha de outro usuário, sem precisar da senha atual
+     * dele. Corpo opcional: sem {@code newPassword}, o backend gera uma senha
+     * e a devolve (para o admin copiar/entregar); com {@code newPassword}, o
+     * admin já escolheu a senha e nada é devolvido.
+     */
+    @PostMapping("/{id}/reset-password")
+    @PreAuthorize("hasPermission(null, 'USER_UPDATE')")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> resetPassword(
+            @PathVariable Long id,
+            @RequestBody(required = false) ResetPasswordRequest request) {
+        String generated = userService.resetPassword(id, request != null ? request.getNewPassword() : null);
+        Map<String, Object> body = generated != null ? Map.of("password", generated) : Map.of();
+        return ResponseEntity.ok(ApiResponse.success(body));
     }
 
     // ── Vínculos ──────────────────────────────────────────────────────────────

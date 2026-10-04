@@ -5,6 +5,7 @@ import com.igrejahub.churches.repository.ChurchRepository;
 import com.igrejahub.common.exception.BusinessException;
 import com.igrejahub.common.tenant.TenantContext;
 import com.igrejahub.congregations.repository.CongregationRepository;
+import com.igrejahub.roles.entity.Role;
 import com.igrejahub.roles.repository.RoleRepository;
 import com.igrejahub.security.SecurityUtils;
 import com.igrejahub.security.UserPrincipal;
@@ -115,13 +116,14 @@ class UserServiceIsolationTest {
     }
 
     @Test
-    void rootGlobal_rejectsCongregationFromDifferentChurch() {
+    void rootGlobal_alwaysRejected_mustEnterChurchFirst() {
+        // ROOT sem Igreja selecionada (modo global) nunca pode criar usuário
+        // direto — precisa entrar numa Igreja primeiro, mesmo informando
+        // churchId/congregationId válidos no corpo.
         TenantContext.setCurrentTenant(1L);
         when(securityUtils.isRoot()).thenReturn(true);
         when(securityUtils.canViewAll()).thenReturn(true);
         when(userRepository.existsByEmail(anyString())).thenReturn(false);
-        when(churchRepository.existsByOrganizationIdAndId(1L, 20L)).thenReturn(true);
-        when(congregationRepository.existsByOrganizationIdAndIdAndChurchId(1L, 500L, 20L)).thenReturn(false);
 
         UserService service = newService();
         assertThrows(BusinessException.class, () -> service.createUser(baseRequest(20L, 500L)));
@@ -129,16 +131,18 @@ class UserServiceIsolationTest {
     }
 
     @Test
-    void rootGlobal_acceptsMatchingChurchAndCongregation() {
+    void rootFiltered_afterEnteringChurch_acceptsMatchingCongregation() {
+        // ROOT que já entrou numa Igreja (modo filtrado) segue o mesmo
+        // caminho de um admin de Igreja comum: churchId vem do contexto.
         TenantContext.setCurrentTenant(1L);
         when(securityUtils.isRoot()).thenReturn(true);
-        when(securityUtils.canViewAll()).thenReturn(true);
+        when(securityUtils.canViewAll()).thenReturn(false);
+        when(securityUtils.getEffectiveChurchId()).thenReturn(20L);
         when(userRepository.existsByEmail(anyString())).thenReturn(false);
-        when(churchRepository.existsByOrganizationIdAndId(1L, 20L)).thenReturn(true);
         when(congregationRepository.existsByOrganizationIdAndIdAndChurchId(1L, 500L, 20L)).thenReturn(true);
         when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        newService().createUser(baseRequest(20L, 500L));
+        newService().createUser(baseRequest(null, 500L));
 
         ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
         verify(userRepository).save(captor.capture());
@@ -224,6 +228,68 @@ class UserServiceIsolationTest {
 
         UserService service = newService();
         assertThrows(BusinessException.class, () -> service.getUser(5L));
+    }
+
+    @Test
+    void createUser_withoutAnyRole_fallsBackToDefaultUsuarioRole() {
+        // Nenhum roleIds/roleName no corpo: antes o usuário era criado sem
+        // role nenhuma (logava mas não acessava nada) — agora cai no perfil
+        // básico "USUARIO".
+        TenantContext.setCurrentTenant(1L);
+        TenantContext.setCurrentCongregationId(null);
+        when(securityUtils.isRoot()).thenReturn(false);
+        when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
+        when(userRepository.existsByEmail(anyString())).thenReturn(false);
+        Role usuario = Role.builder().id(9L).name("USUARIO").permissions(Set.of()).build();
+        when(roleRepository.findByName("USUARIO")).thenReturn(Optional.of(usuario));
+        when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        CreateUserRequest req = CreateUserRequest.builder()
+            .name("Fulano").email("fulano@example.com").password("senha1234").build();
+        newService().createUser(req);
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).save(captor.capture());
+        assertEquals(Set.of(usuario), captor.getValue().getRoles());
+    }
+
+    @Test
+    void resetPassword_withExplicitPassword_returnsNullAndEncodesIt() {
+        TenantContext.setCurrentTenant(1L);
+        User target = new User();
+        target.setId(5L);
+        target.setOrganizationId(1L);
+        target.setChurchId(10L);
+        when(userRepository.findByOrganizationIdAndId(1L, 5L)).thenReturn(Optional.of(target));
+        when(securityUtils.canViewAll()).thenReturn(false);
+        when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
+        when(passwordEncoder.encode("novaSenha123")).thenReturn("hashed");
+        when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        String result = newService().resetPassword(5L, "novaSenha123");
+
+        assertNull(result);
+        assertEquals("hashed", target.getPasswordHash());
+    }
+
+    @Test
+    void resetPassword_withoutPassword_generatesAndReturnsOne() {
+        TenantContext.setCurrentTenant(1L);
+        User target = new User();
+        target.setId(5L);
+        target.setOrganizationId(1L);
+        target.setChurchId(10L);
+        when(userRepository.findByOrganizationIdAndId(1L, 5L)).thenReturn(Optional.of(target));
+        when(securityUtils.canViewAll()).thenReturn(false);
+        when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
+        when(passwordEncoder.encode(anyString())).thenReturn("hashed");
+        when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        String result = newService().resetPassword(5L, null);
+
+        assertNotNull(result);
+        assertFalse(result.isBlank());
+        assertEquals("hashed", target.getPasswordHash());
     }
 
     @Test
