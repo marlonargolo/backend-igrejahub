@@ -131,6 +131,29 @@ class DashboardServiceIsolationTest {
     }
 
     @Test
+    void pendingRevenueAndExpenses_areReportedSeparately_fromConfirmedTotals() {
+        // Lançamentos pendentes não podem contaminar monthlyRevenue/monthlyExpenses
+        // (a conciliação continua igual) — mas o Dashboard precisa avisar que
+        // existem lançamentos aguardando confirmação, em campos próprios.
+        TenantContext.setCurrentTenant(1L);
+        TenantContext.setCurrentCongregationId(null);
+        when(securityUtils.canViewAll()).thenReturn(false);
+        when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
+        when(transactionRepository.sumConfirmedRevenueCentsByFilter(eq(1L), any(), any(), eq(10L), any()))
+            .thenReturn(100000L);
+        when(transactionRepository.sumPendingRevenueCentsByFilter(eq(1L), any(), any(), eq(10L), any()))
+            .thenReturn(50000L);
+        when(transactionRepository.sumPendingExpenseCentsByFilter(eq(1L), any(), any(), eq(10L), any()))
+            .thenReturn(20000L);
+
+        var metrics = newService().getDashboardMetrics(DashboardFilterDto.builder().build());
+
+        assertEquals(new java.math.BigDecimal("1000.00"), metrics.getMonthlyRevenue());
+        assertEquals(new java.math.BigDecimal("500.00"), metrics.getPendingRevenue());
+        assertEquals(new java.math.BigDecimal("200.00"), metrics.getPendingExpenses());
+    }
+
+    @Test
     void activeUsers_rootGlobal_countsWholeOrganization() {
         TenantContext.setCurrentTenant(1L);
         when(securityUtils.canViewAll()).thenReturn(true);

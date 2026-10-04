@@ -77,6 +77,14 @@ public class DashboardService {
         long pendingTransactions = transactionRepository.countByFilter(
                 orgId, com.igrejahub.finance.entity.FinancialTransaction.TransactionStatus.PENDING, churchId, congregationId);
 
+        // Lançado no período mas ainda não confirmado — só para avisar no
+        // Dashboard; a regra de conciliação (só CONFIRMED entra em
+        // monthlyRevenue/monthlyExpenses) não muda.
+        BigDecimal pendingRevenue = FinancialAccountMapper.centsToAmount(
+                transactionRepository.sumPendingRevenueCentsByFilter(orgId, start, end, churchId, congregationId));
+        BigDecimal pendingExpenses = FinancialAccountMapper.centsToAmount(
+                transactionRepository.sumPendingExpenseCentsByFilter(orgId, start, end, churchId, congregationId));
+
         long activeUsers = viewAll
             ? userRepository.countByOrganizationIdAndActive(orgId, true)
             : userRepository.countActiveByFilter(orgId, churchId, congregationId);
@@ -91,6 +99,8 @@ public class DashboardService {
                 .totalAssets(0L)
                 .activeUsers(activeUsers)
                 .pendingTransactions(pendingTransactions)
+                .pendingRevenue(pendingRevenue)
+                .pendingExpenses(pendingExpenses)
                 .build();
     }
 }
