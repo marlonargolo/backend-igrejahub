@@ -5,6 +5,7 @@ import com.igrejahub.auth.service.AuthenticationService;
 import com.igrejahub.auth.service.EmailVerificationService;
 import com.igrejahub.common.dto.ApiResponse;
 import com.igrejahub.common.exception.ResourceNotFoundException;
+import com.igrejahub.modules.service.ModuleService;
 import com.igrejahub.organizations.entity.Organization;
 import com.igrejahub.organizations.repository.OrganizationRepository;
 import com.igrejahub.security.UserPrincipal;
@@ -36,6 +37,7 @@ public class AuthController {
     private final OrganizationRepository organizationRepository;
     private final CustomUserDetailsService userDetailsService;
     private final UserService userService;
+    private final ModuleService moduleService;
 
     @Operation(summary = "Login")
     @PostMapping("/login")
@@ -94,6 +96,7 @@ public class AuthController {
             .linkedCongregationIds(user.isAccessMainChurch()
                 ? java.util.List.of()
                 : userService.getOwnLinkedCongregationIds(user.getId()))
+            .enabledModules(moduleService.getEnabledModuleKeys(user.getChurchId()))
             .roles(user.getRoles().stream()
                 .map(r -> r.getName())
                 .collect(Collectors.toSet()))

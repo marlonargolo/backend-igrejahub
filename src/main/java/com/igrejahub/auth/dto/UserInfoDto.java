@@ -27,6 +27,8 @@ public class UserInfoDto {
     private boolean accessMainChurch;
     /** Congregações vinculadas (user_congregation_access) — só relevante quando accessMainChurch=false. */
     private List<Long> linkedCongregationIds;
+    /** Chaves dos módulos habilitados para a Igreja do usuário (Admin Externa → Módulos). */
+    private List<String> enabledModules;
     private Set<String> roles;
     private Set<String> permissions;
 }
