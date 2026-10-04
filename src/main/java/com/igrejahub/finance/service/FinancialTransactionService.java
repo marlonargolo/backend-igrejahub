@@ -71,6 +71,12 @@ public class FinancialTransactionService {
             }
         }
 
+        // Restrito às Congregações vinculadas e sem ter resolvido nenhuma
+        // ainda → nunca cai no fallback de Igreja inteira (churchId sozinho).
+        if (!securityUtils.canViewAll() && TenantContext.isMainChurchAccessDenied() && congId == null) {
+            return Page.empty(pageable);
+        }
+
         // findByFilters: churchId = null → ROOT global vê tudo; não-null → filtra
         return transactionRepository.findByFilters(
                 orgId, typeEnum, churchId, congId, statusEnum, memberId, pageable)
@@ -86,6 +92,11 @@ public class FinancialTransactionService {
     public List<FinancialTransactionDto> getContributions(Long memberId) {
         Long orgId    = TenantContext.getCurrentTenant();
         Long churchId = securityUtils.getEffectiveChurchId();
+
+        if (!securityUtils.canViewAll() && TenantContext.isMainChurchAccessDenied()
+                && TenantContext.getCurrentCongregationId() == null) {
+            return List.of();
+        }
 
         return transactionRepository.findContributionsByMember(orgId, memberId, churchId)
             .stream().map(t -> toDtoWithRelations(t)).collect(Collectors.toList());
@@ -106,6 +117,10 @@ public class FinancialTransactionService {
         Long targetCongId = securityUtils.canViewAll()
             ? request.getCongregationId()
             : TenantContext.getCurrentCongregationId();
+
+        if (!securityUtils.canViewAll() && TenantContext.isMainChurchAccessDenied() && targetCongId == null) {
+            throw new BusinessException("Selecione uma Congregação para continuar.");
+        }
 
         FinancialTransaction transaction = FinancialTransaction.builder()
             .churchId(targetChurchId)
@@ -232,7 +247,11 @@ public class FinancialTransactionService {
         if (!securityUtils.canViewAll()) {
             Long callerChurchId = securityUtils.getEffectiveChurchId();
             Long callerCongId   = TenantContext.getCurrentCongregationId();
-            if (callerCongId != null && !callerCongId.equals(transaction.getCongregationId())) {
+            if (TenantContext.isMainChurchAccessDenied()) {
+                if (callerCongId == null || !callerCongId.equals(transaction.getCongregationId())) {
+                    throw new BusinessException("Você não tem acesso a esta transação.");
+                }
+            } else if (callerCongId != null && !callerCongId.equals(transaction.getCongregationId())) {
                 throw new BusinessException("Você não tem acesso a esta transação.");
             } else if (callerChurchId != null && !callerChurchId.equals(transaction.getChurchId())) {
                 throw new BusinessException("Você não tem acesso a esta transação.");

@@ -142,6 +142,27 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success());
     }
 
+    /**
+     * true (padrão) = o usuário pode ver a Igreja inteira, além de poder
+     * "entrar" em qualquer Congregação dela.
+     * false = fica restrito só às Congregações vinculadas acima — nunca vê a
+     * Igreja inteira, mesmo sem congregationId fixo.
+     */
+    @GetMapping("/{id}/access-main-church")
+    @PreAuthorize("hasPermission(null, 'USER_VIEW')")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getAccessMainChurch(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success(
+            Map.of("accessMainChurch", userService.getAccessMainChurch(id))));
+    }
+
+    @PutMapping("/{id}/access-main-church")
+    @PreAuthorize("hasPermission(null, 'USER_CHURCH_TRANSFER')")
+    public ResponseEntity<ApiResponse<Void>> setAccessMainChurch(
+            @PathVariable Long id, @RequestBody Map<String, Boolean> body) {
+        userService.setAccessMainChurch(id, Boolean.TRUE.equals(body.get("accessMainChurch")));
+        return ResponseEntity.ok(ApiResponse.success());
+    }
+
     // ── Permissões individuais ────────────────────────────────────────────────
 
     @GetMapping("/permissions/available")

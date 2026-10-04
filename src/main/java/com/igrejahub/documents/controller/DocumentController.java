@@ -56,6 +56,8 @@ public class DocumentController {
             page = documentRepository.findByOrganizationIdAndDeletedFalse(orgId, pageable);
         } else if (congId != null) {
             page = documentRepository.findForCongregation(orgId, churchId, congId, pageable);
+        } else if (TenantContext.isMainChurchAccessDenied()) {
+            page = Page.empty(pageable);
         } else if (churchId != null) {
             page = documentRepository.findByOrganizationIdAndChurchId(orgId, churchId, pageable);
         } else {
@@ -122,12 +124,21 @@ public class DocumentController {
     public ResponseEntity<Resource> downloadDocument(@PathVariable Long id) {
         Long orgId    = TenantContext.getCurrentTenant();
         Long churchId = securityUtils.getEffectiveChurchId();
+        Long congId   = TenantContext.getCurrentCongregationId();
 
         IgrejaDocument doc = documentRepository.findById(id)
             .orElseThrow(() -> new BusinessException("Documento não encontrado"));
         if (!doc.getOrganizationId().equals(orgId)) throw new BusinessException("Acesso não autorizado");
-        if (!securityUtils.canViewAll() && churchId != null && !churchId.equals(doc.getChurchId())) {
-            throw new BusinessException("Você não tem acesso a este documento");
+        if (!securityUtils.canViewAll()) {
+            if (churchId != null && !churchId.equals(doc.getChurchId())) {
+                throw new BusinessException("Você não tem acesso a este documento");
+            }
+            if (TenantContext.isMainChurchAccessDenied() && congId == null) {
+                throw new BusinessException("Você não tem acesso a este documento");
+            }
+            if (congId != null && doc.getCongregationId() != null && !congId.equals(doc.getCongregationId())) {
+                throw new BusinessException("Você não tem acesso a este documento");
+            }
         }
 
         Path file = Paths.get("/app" + doc.getFileUrl());

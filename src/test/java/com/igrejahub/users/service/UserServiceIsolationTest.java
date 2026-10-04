@@ -189,6 +189,44 @@ class UserServiceIsolationTest {
     }
 
     @Test
+    void restrictedCaller_withoutResolvedCongregation_cannotCreateUser() {
+        // accessMainChurch=false e múltiplas Congregações vinculadas, nenhuma
+        // escolhida ainda: TenantIsolationFilter manda congId=null +
+        // mainChurchAccessDenied=true — não pode criar usuário "na Igreja toda".
+        TenantContext.setCurrentTenant(1L);
+        TenantContext.setCurrentCongregationId(null);
+        TenantContext.setMainChurchAccessDenied(true);
+        when(securityUtils.isRoot()).thenReturn(false);
+        when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
+        when(userRepository.existsByEmail(anyString())).thenReturn(false);
+
+        UserService service = newService();
+        assertThrows(BusinessException.class, () -> service.createUser(baseRequest(null, 100L)));
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void restrictedCaller_cannotManageUserFromUnlinkedCongregation() {
+        // Mesma Igreja, mas a congregação do usuário-alvo não é a que o
+        // chamador restrito "entrou" — diferente do admin normal, isso aqui
+        // nunca basta (nunca cai no fallback de churchId sozinho).
+        TenantContext.setCurrentTenant(1L);
+        TenantContext.setCurrentCongregationId(100L);
+        TenantContext.setMainChurchAccessDenied(true);
+        User other = new User();
+        other.setId(5L);
+        other.setOrganizationId(1L);
+        other.setChurchId(10L);
+        other.setCongregationId(200L);
+        when(userRepository.findByOrganizationIdAndId(1L, 5L)).thenReturn(Optional.of(other));
+        when(securityUtils.canViewAll()).thenReturn(false);
+        when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
+
+        UserService service = newService();
+        assertThrows(BusinessException.class, () -> service.getUser(5L));
+    }
+
+    @Test
     void setUserChurches_nonRootCannotGrantAccessToOtherChurch() {
         TenantContext.setCurrentTenant(1L);
         User target = new User();

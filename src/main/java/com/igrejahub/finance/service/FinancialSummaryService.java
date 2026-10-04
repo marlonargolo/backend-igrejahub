@@ -33,6 +33,13 @@ public class FinancialSummaryService {
         LocalDate start = startDate != null ? startDate : LocalDate.now().withDayOfMonth(1);
         LocalDate end   = endDate   != null ? endDate   : LocalDate.now();
 
+        // Restrito às Congregações vinculadas e sem ter resolvido nenhuma
+        // ainda → resumo zerado, nunca o da Igreja inteira.
+        if (!securityUtils.canViewAll() && TenantContext.isMainChurchAccessDenied() && congId == null) {
+            return new FinancialSummaryDto(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                BigDecimal.ZERO, 0L, new ArrayList<>(), new ArrayList<>());
+        }
+
         long revenueCents = transactionRepository.sumConfirmedRevenueCentsByFilter(
             orgId, start, end, churchId, congId);
         long expenseCents = transactionRepository.sumConfirmedExpenseCentsByFilter(

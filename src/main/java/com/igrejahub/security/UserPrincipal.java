@@ -22,6 +22,7 @@ public class UserPrincipal implements UserDetails {
     private final Long organizationId;
     private final Long churchId;         // ADICIONADO
     private final Long congregationId;   // ADICIONADO
+    private final boolean accessMainChurch; // ADICIONADO
     private final boolean active;
     private final boolean locked;
     private final Set<GrantedAuthority> authorities;
@@ -42,6 +43,11 @@ public class UserPrincipal implements UserDetails {
             congId = (Long) user.getClass().getMethod("getCongregationId").invoke(user);
         } catch (Exception ignored) {}
         this.congregationId = congId;
+        boolean mainChurch = true;
+        try {
+            mainChurch = (boolean) user.getClass().getMethod("isAccessMainChurch").invoke(user);
+        } catch (Exception ignored) {}
+        this.accessMainChurch = mainChurch;
         this.active  = user.isActive();
         this.locked  = user.isLocked();
         this.authorities = user.getRoles() != null
@@ -71,6 +77,15 @@ public class UserPrincipal implements UserDetails {
     public UserPrincipal(Long id, String name, String email, String password,
                          Long organizationId, Long churchId, Long congregationId,
                          Set<GrantedAuthority> authorities, Set<String> permissions) {
+        this(id, name, email, password, organizationId, churchId, congregationId,
+            true, authorities, permissions);
+    }
+
+    /** Variante de teste que também permite fixar accessMainChurch explicitamente. */
+    public UserPrincipal(Long id, String name, String email, String password,
+                         Long organizationId, Long churchId, Long congregationId,
+                         boolean accessMainChurch,
+                         Set<GrantedAuthority> authorities, Set<String> permissions) {
         this.id             = id;
         this.name           = name;
         this.username       = email;
@@ -79,6 +94,7 @@ public class UserPrincipal implements UserDetails {
         this.organizationId = organizationId;
         this.churchId       = churchId;
         this.congregationId = congregationId;
+        this.accessMainChurch = accessMainChurch;
         this.active         = true;
         this.locked         = false;
         this.authorities    = authorities != null ? authorities : new HashSet<>();

@@ -83,6 +83,11 @@ public class SupportService {
                 .stream().map(this::toDto).collect(Collectors.toList());
         }
 
+        // Restrito às Congregações vinculadas e sem ter resolvido nenhuma ainda
+        if (TenantContext.isMainChurchAccessDenied()) {
+            return Collections.emptyList();
+        }
+
         // ROOT com contexto ou Admin/Pastor → só da Igreja
         if (churchId != null) {
             return ticketRepo.findByOrganizationIdAndChurchId(orgId, churchId)
@@ -114,6 +119,9 @@ public class SupportService {
         // Não-ROOT sem Igreja: bloquear
         if (!securityUtils.canViewAll() && churchId == null) {
             throw new BusinessException("Seu usuário não está vinculado a nenhuma Igreja.");
+        }
+        if (TenantContext.isMainChurchAccessDenied() && congId == null) {
+            throw new BusinessException("Selecione uma Congregação para continuar.");
         }
 
         SupportTicket ticket = SupportTicket.builder()
@@ -182,6 +190,13 @@ public class SupportService {
             throw new BusinessException("Acesso não autorizado a este chamado.");
         }
         if (securityUtils.canViewAll()) return;
+
+        if (TenantContext.isMainChurchAccessDenied()) {
+            if (congId == null || !congId.equals(t.getCongregationId())) {
+                throw new BusinessException("Você não tem acesso a este chamado.");
+            }
+            return;
+        }
 
         // Pastor de Congregação, ou ROOT/admin dentro de uma Congregação
         if (congId != null) {

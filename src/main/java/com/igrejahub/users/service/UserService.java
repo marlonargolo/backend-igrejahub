@@ -79,6 +79,9 @@ public class UserService {
                     orgId, userCongId, pageable).map(userMapper::toDto);
         }
 
+        // Restrito às Congregações vinculadas e sem ter resolvido nenhuma ainda
+        if (TenantContext.isMainChurchAccessDenied()) return Page.empty(pageable);
+
         return search != null && !search.isEmpty()
             ? userRepository.findByOrganizationIdAndChurchIdAndSearch(
                 orgId, effectiveChurchId, search, pageable).map(userMapper::toDto)
@@ -149,6 +152,9 @@ public class UserService {
             targetChurchId = securityUtils.getEffectiveChurchId();
             if (targetChurchId == null) {
                 throw new BusinessException("Seu usuário não está vinculado a nenhuma Igreja.");
+            }
+            if (TenantContext.isMainChurchAccessDenied()) {
+                throw new BusinessException("Selecione uma Congregação para continuar.");
             }
             targetCongId = request.getCongregationId();
             if (targetCongId != null && !congregationRepository
@@ -326,6 +332,19 @@ public class UserService {
         auditLogService.logAction("SET_USER_CONGREGATIONS", "USER", userId, null, congregationIds);
     }
 
+    public boolean getAccessMainChurch(Long userId) {
+        return getManageableUser(userId).isAccessMainChurch();
+    }
+
+    @Transactional
+    public void setAccessMainChurch(Long userId, boolean accessMainChurch) {
+        User user = getManageableUser(userId);
+        user.setAccessMainChurch(accessMainChurch);
+        userRepository.save(user);
+        auditLogService.logAction("SET_USER_ACCESS_MAIN_CHURCH", "USER", userId, null,
+            Map.of("accessMainChurch", accessMainChurch));
+    }
+
     // ── Permissões individuais ────────────────────────────────────────────────
 
     public List<String> getUserPermissions(Long userId) {
@@ -420,6 +439,12 @@ public class UserService {
             throw new BusinessException("Você não tem permissão para gerenciar este usuário.");
         }
         Long callerCongId = TenantContext.getCurrentCongregationId();
+        if (TenantContext.isMainChurchAccessDenied()) {
+            if (callerCongId == null || !callerCongId.equals(target.getCongregationId())) {
+                throw new BusinessException("Você não tem permissão para gerenciar este usuário.");
+            }
+            return;
+        }
         if (callerCongId != null && !securityUtils.isRoot()
                 && !callerCongId.equals(target.getCongregationId())) {
             throw new BusinessException("Você não tem permissão para gerenciar este usuário.");

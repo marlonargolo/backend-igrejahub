@@ -53,6 +53,10 @@ public class MemberService {
                 .map(this::toDto);
         }
 
+        // Restrito às Congregações vinculadas (accessMainChurch=false) e sem
+        // ter resolvido nenhuma ainda → nunca cai no fallback de Igreja inteira.
+        if (TenantContext.isMainChurchAccessDenied()) return Page.empty(pageable);
+
         // Admin/Pastor da Igreja ou ROOT com contexto → filtra por churchId
         if (effChurchId == null) return Page.empty(pageable);
 
@@ -71,6 +75,14 @@ public class MemberService {
         if (!securityUtils.canViewAll()) {
             Long eff = securityUtils.getEffectiveChurchId();
             if (eff != null && !eff.equals(member.getChurchId())) {
+                throw new BusinessException("Você não tem acesso a este membro.");
+            }
+            Long congId = TenantContext.getCurrentCongregationId();
+            if (TenantContext.isMainChurchAccessDenied()) {
+                if (congId == null || !congId.equals(member.getCongregationId())) {
+                    throw new BusinessException("Você não tem acesso a este membro.");
+                }
+            } else if (congId != null && !congId.equals(member.getCongregationId())) {
                 throw new BusinessException("Você não tem acesso a este membro.");
             }
         }
@@ -92,6 +104,9 @@ public class MemberService {
             Long effChurchId = securityUtils.getEffectiveChurchId();
             if (effChurchId == null) {
                 throw new BusinessException("Seu usuário não está vinculado a nenhuma Igreja.");
+            }
+            if (TenantContext.isMainChurchAccessDenied() && TenantContext.getCurrentCongregationId() == null) {
+                throw new BusinessException("Selecione uma Congregação para continuar.");
             }
             // Não pode criar em outra Igreja
             if (request.getChurchId() != null && !request.getChurchId().equals(effChurchId)) {

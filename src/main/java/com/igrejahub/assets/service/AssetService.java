@@ -74,6 +74,9 @@ public class AssetService {
                 .map(a -> toDto(a, orgId));
         }
 
+        // Restrito às Congregações vinculadas e sem ter resolvido nenhuma ainda
+        if (TenantContext.isMainChurchAccessDenied()) return Page.empty(pageable);
+
         // Admin/Pastor Igreja ou ROOT com contexto → só da Igreja
         if (churchId == null) return Page.empty(pageable);
 
@@ -112,6 +115,9 @@ public class AssetService {
             Long callerChurchId = securityUtils.getEffectiveChurchId();
             if (callerChurchId == null) {
                 throw new BusinessException("Seu usuário não está vinculado a nenhuma Igreja.");
+            }
+            if (TenantContext.isMainChurchAccessDenied() && TenantContext.getCurrentCongregationId() == null) {
+                throw new BusinessException("Selecione uma Congregação para continuar.");
             }
             if (request.getChurchId() != null && !request.getChurchId().equals(callerChurchId)) {
                 throw new BusinessException("Você não pode criar bens em outra Igreja.");
@@ -271,6 +277,12 @@ public class AssetService {
 
         if (churchId != null && !churchId.equals(asset.getChurchId())) {
             throw new BusinessException("Você não tem acesso a este bem patrimonial.");
+        }
+        if (TenantContext.isMainChurchAccessDenied()) {
+            if (congId == null || !congId.equals(asset.getCongregationId())) {
+                throw new BusinessException("Você não tem acesso a este bem patrimonial.");
+            }
+            return;
         }
         if (congId != null && !congId.equals(asset.getCongregationId())) {
             throw new BusinessException("Você não tem acesso a este bem patrimonial.");

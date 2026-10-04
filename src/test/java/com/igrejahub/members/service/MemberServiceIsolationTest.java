@@ -14,6 +14,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -71,6 +72,27 @@ class MemberServiceIsolationTest {
         newService().getMembers(pageable, null, null, null, null);
 
         verify(memberRepository).findByChurchId(eq(1L), eq(10L), any(), any(), any(), eq(pageable));
+        verify(memberRepository, never()).findByCongregationId(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void getMembers_restrictedWithoutResolvedCongregation_returnsEmpty_neverWholeChurch() {
+        // Usuário com accessMainChurch=false e mais de uma Congregação vinculada,
+        // sem ter escolhido nenhuma ainda (TenantIsolationFilter manda congId=null
+        // + mainChurchAccessDenied=true nesse caso) — nunca pode cair no fallback
+        // de Igreja inteira, mesmo tendo um churchId efetivo válido.
+        TenantContext.setCurrentTenant(1L);
+        TenantContext.setCurrentCongregationId(null);
+        TenantContext.setMainChurchAccessDenied(true);
+        Pageable pageable = PageRequest.of(0, 20);
+
+        when(securityUtils.canViewAll()).thenReturn(false);
+        when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
+
+        var result = newService().getMembers(pageable, null, null, null, null);
+
+        assertEquals(0, result.getTotalElements());
+        verify(memberRepository, never()).findByChurchId(any(), any(), any(), any(), any(), any());
         verify(memberRepository, never()).findByCongregationId(any(), any(), any(), any(), any());
     }
 }

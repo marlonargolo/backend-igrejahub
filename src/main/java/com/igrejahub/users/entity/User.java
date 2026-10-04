@@ -63,6 +63,17 @@ public class User extends BaseEntity {
     @Column(name = "congregation_id")
     private Long congregationId;
 
+    /**
+     * true (padrão) = pode ver a Igreja inteira, além de poder "entrar" em
+     * qualquer Congregação dela.
+     * false = restrito só às Congregações em user_congregation_access —
+     * nunca vê a Igreja inteira, mesmo sem congregationId fixo.
+     * Adicionado na migration V44.
+     */
+    @Column(name = "access_main_church")
+    @Builder.Default
+    private boolean accessMainChurch = true;
+
     @ManyToMany(fetch = FetchType.EAGER)
     @JoinTable(
         name = "user_roles",

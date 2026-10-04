@@ -58,6 +58,17 @@ public class DashboardService {
             } else {
                 congregationId = null;
             }
+
+            // Restrito às Congregações vinculadas e sem ter resolvido nenhuma
+            // ainda → nenhum dado da Igreja inteira deve aparecer no painel.
+            if (TenantContext.isMainChurchAccessDenied() && congregationId == null) {
+                return DashboardMetrics.builder()
+                    .totalMembers(0L).totalChurches(0L).totalCongregations(0L)
+                    .monthlyRevenue(BigDecimal.ZERO).monthlyExpenses(BigDecimal.ZERO)
+                    .balance(BigDecimal.ZERO).totalAssets(0L).activeUsers(0L)
+                    .pendingTransactions(0L).pendingRevenue(BigDecimal.ZERO).pendingExpenses(BigDecimal.ZERO)
+                    .build();
+            }
         }
 
         long totalMembers = memberRepository.countByFilter(orgId, "ACTIVE", churchId, congregationId);
