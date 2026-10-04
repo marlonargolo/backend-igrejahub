@@ -58,6 +58,26 @@ public interface FinancialTransactionRepository extends BaseRepository<Financial
         @Param("status") FinancialTransaction.TransactionStatus status,
         @Param("churchId") Long churchId, @Param("congregationId") Long congregationId);
 
+    // ── Pendente de confirmação: usado só para avisar no Dashboard, nunca
+    //    para substituir o total confirmado (a conciliação continua igual) ──
+    @Query("SELECT COALESCE(SUM(t.amountCents), 0) FROM FinancialTransaction t " +
+           "WHERE t.organizationId = :orgId AND t.type = 'REVENUE' AND t.status = 'PENDING' " +
+           "AND t.transactionDate BETWEEN :startDate AND :endDate " +
+           "AND (:churchId IS NULL OR t.churchId = :churchId) " +
+           "AND (:congregationId IS NULL OR t.congregationId = :congregationId)")
+    long sumPendingRevenueCentsByFilter(@Param("orgId") Long orgId,
+        @Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate,
+        @Param("churchId") Long churchId, @Param("congregationId") Long congregationId);
+
+    @Query("SELECT COALESCE(SUM(t.amountCents), 0) FROM FinancialTransaction t " +
+           "WHERE t.organizationId = :orgId AND t.type = 'EXPENSE' AND t.status = 'PENDING' " +
+           "AND t.transactionDate BETWEEN :startDate AND :endDate " +
+           "AND (:churchId IS NULL OR t.churchId = :churchId) " +
+           "AND (:congregationId IS NULL OR t.congregationId = :congregationId)")
+    long sumPendingExpenseCentsByFilter(@Param("orgId") Long orgId,
+        @Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate,
+        @Param("churchId") Long churchId, @Param("congregationId") Long congregationId);
+
     @Query("SELECT t.categoryId, COALESCE(SUM(t.amountCents), 0) FROM FinancialTransaction t " +
            "WHERE t.organizationId = :orgId AND t.type = :type AND t.status = 'CONFIRMED' " +
            "AND t.transactionDate BETWEEN :startDate AND :endDate GROUP BY t.categoryId")

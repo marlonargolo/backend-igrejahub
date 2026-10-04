@@ -20,4 +20,7 @@ public class DashboardMetrics {
     private Long totalAssets;
     private Long activeUsers;
     private Long pendingTransactions;
+    /** Lançado no período mas ainda não confirmado — não entra em monthlyRevenue/monthlyExpenses. */
+    private BigDecimal pendingRevenue;
+    private BigDecimal pendingExpenses;
 }
