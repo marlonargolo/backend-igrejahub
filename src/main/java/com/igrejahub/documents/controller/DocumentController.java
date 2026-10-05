@@ -72,17 +72,40 @@ public class DocumentController {
             .build()));
     }
 
+    /**
+     * ROOT em modo global escolhe churchId/congregationId livremente (envia Igreja/
+     * Congregação). Qualquer outro chamador (incluindo ROOT com Igreja selecionada)
+     * tem churchId/congregationId forçados pelo próprio contexto — nunca lê esses
+     * valores do request — para que a Secretaria de uma Igreja não consiga marcar um
+     * documento como destinado a outra Igreja/Congregação.
+     */
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasPermission(null, 'ROOT_ACCESS')")
+    @PreAuthorize("hasPermission(null, 'SETTINGS_UPDATE')")
     public ResponseEntity<ApiResponse<Map<String, Object>>> uploadDocument(
             @RequestParam("file")            MultipartFile file,
             @RequestParam("title")           String title,
             @RequestParam(value = "description", required = false) String description,
-            @RequestParam("churchId")        Long churchId,
-            @RequestParam(value = "congregationId", required = false) Long congregationId) throws IOException {
+            @RequestParam(value = "churchId", required = false)        Long requestedChurchId,
+            @RequestParam(value = "congregationId", required = false) Long requestedCongregationId) throws IOException {
 
         Long orgId  = TenantContext.getCurrentTenant();
         Long userId = securityUtils.getCurrentUserId();
+
+        Long churchId;
+        Long congregationId;
+        if (securityUtils.canViewAll()) {
+            if (requestedChurchId == null) {
+                throw new BusinessException("Selecione a Igreja para o documento.");
+            }
+            churchId = requestedChurchId;
+            congregationId = requestedCongregationId;
+        } else {
+            churchId = securityUtils.getEffectiveChurchId();
+            if (churchId == null) {
+                throw new BusinessException("Seu usuário não está vinculado a nenhuma Igreja.");
+            }
+            congregationId = TenantContext.getCurrentCongregationId();
+        }
 
         Files.createDirectories(UPLOAD_DIR);
         String ext      = getExtension(file.getOriginalFilename());
@@ -106,12 +129,26 @@ public class DocumentController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasPermission(null, 'ROOT_ACCESS')")
+    @PreAuthorize("hasPermission(null, 'SETTINGS_UPDATE')")
     public ResponseEntity<ApiResponse<Void>> deleteDocument(@PathVariable Long id) {
-        Long orgId = TenantContext.getCurrentTenant();
+        Long orgId    = TenantContext.getCurrentTenant();
+        Long churchId = securityUtils.getEffectiveChurchId();
+        Long congId   = TenantContext.getCurrentCongregationId();
+
         IgrejaDocument doc = documentRepository.findById(id)
             .orElseThrow(() -> new BusinessException("Documento não encontrado"));
         if (!doc.getOrganizationId().equals(orgId)) throw new BusinessException("Acesso não autorizado");
+        if (!securityUtils.canViewAll()) {
+            if (churchId != null && !churchId.equals(doc.getChurchId())) {
+                throw new BusinessException("Você não tem acesso a este documento");
+            }
+            if (TenantContext.isMainChurchAccessDenied() && congId == null) {
+                throw new BusinessException("Você não tem acesso a este documento");
+            }
+            if (congId != null && doc.getCongregationId() != null && !congId.equals(doc.getCongregationId())) {
+                throw new BusinessException("Você não tem acesso a este documento");
+            }
+        }
         doc.setDeleted(true);
         doc.setUpdatedAt(LocalDateTime.now());
         documentRepository.save(doc);
