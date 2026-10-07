@@ -21,6 +21,7 @@ public final class TenantContext {
     private static final ThreadLocal<Long>    currentChurchId       = new ThreadLocal<>();
     private static final ThreadLocal<Long>    currentCongregationId = new ThreadLocal<>();
     private static final ThreadLocal<Boolean> rootGlobalMode        = new ThreadLocal<>();
+    private static final ThreadLocal<Boolean> mainChurchAccessDenied = new ThreadLocal<>();
 
     private TenantContext() {}
 
@@ -63,6 +64,18 @@ public final class TenantContext {
         return Boolean.TRUE.equals(rootGlobalMode.get());
     }
 
+    // ── Restrição a Congregações vinculadas (sem acesso à Igreja toda) ────────
+    /**
+     * true = este usuário (accessMainChurch=false) nunca pode cair no
+     * fallback "igreja inteira" quando currentCongregationId for null — os
+     * módulos de dados devem devolver vazio/negar nesse caso, nunca mostrar
+     * dados agregados da Igreja.
+     */
+    public static void setMainChurchAccessDenied(boolean denied) { mainChurchAccessDenied.set(denied); }
+    public static boolean isMainChurchAccessDenied() {
+        return Boolean.TRUE.equals(mainChurchAccessDenied.get());
+    }
+
     // ── Cleanup ───────────────────────────────────────────────────────────────
     public static void clear() {
         currentTenant.remove();
@@ -71,5 +84,6 @@ public final class TenantContext {
         currentChurchId.remove();
         currentCongregationId.remove();
         rootGlobalMode.remove();
+        mainChurchAccessDenied.remove();
     }
 }

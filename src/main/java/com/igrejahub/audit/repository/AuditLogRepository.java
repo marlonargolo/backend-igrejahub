@@ -15,6 +15,8 @@ public interface AuditLogRepository extends BaseRepository<AuditLog, Long> {
     Page<AuditLog> findByOrganizationIdAndUserId(Long orgId, Long userId, Pageable pageable);
     Page<AuditLog> findByOrganizationIdAndAction(Long orgId, String action, Pageable pageable);
     Page<AuditLog> findByOrganizationId(Long orgId, Pageable pageable);
+    Page<AuditLog> findByOrganizationIdAndEntityTypeAndEntityIdOrderByCreatedAtDesc(
+        Long orgId, String entityType, Long entityId, Pageable pageable);
 
     /**
      * Filtro combinado usado pela administração externa (ROOT): período, Igreja,

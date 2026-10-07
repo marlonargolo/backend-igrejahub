@@ -79,6 +79,9 @@ public class UserService {
                     orgId, userCongId, pageable).map(userMapper::toDto);
         }
 
+        // Restrito às Congregações vinculadas e sem ter resolvido nenhuma ainda
+        if (TenantContext.isMainChurchAccessDenied()) return Page.empty(pageable);
+
         return search != null && !search.isEmpty()
             ? userRepository.findByOrganizationIdAndChurchIdAndSearch(
                 orgId, effectiveChurchId, search, pageable).map(userMapper::toDto)
@@ -116,40 +119,28 @@ public class UserService {
         Long callerCongId  = TenantContext.getCurrentCongregationId();
         boolean rootGlobal = securityUtils.isRoot() && securityUtils.canViewAll();
 
-        Long targetChurchId;
-        Long targetCongId;
-
         if (rootGlobal) {
-            // ROOT sem Igreja selecionada: churchId e congregationId vêm do corpo,
-            // mas a congregação precisa pertencer à Igreja informada.
-            if (request.getChurchId() == null) {
-                throw new BusinessException("Selecione a Igreja para o novo usuário.");
-            }
-            targetChurchId = request.getChurchId();
-            if (!churchRepository.existsByOrganizationIdAndId(orgId, targetChurchId)) {
-                throw new BusinessException("Igreja não encontrada.");
-            }
-            targetCongId = request.getCongregationId();
-            if (targetCongId != null && !congregationRepository
-                    .existsByOrganizationIdAndIdAndChurchId(orgId, targetCongId, targetChurchId)) {
-                throw new BusinessException("A congregação selecionada não pertence à Igreja informada.");
-            }
-        } else if (callerCongId != null) {
+            // ROOT precisa entrar numa Igreja antes de criar usuários — mesmo
+            // fluxo já usado para gerenciar os demais módulos.
+            throw new BusinessException("Selecione uma Igreja para criar o usuário.");
+        }
+
+        Long targetChurchId = securityUtils.getEffectiveChurchId();
+        if (targetChurchId == null) {
+            throw new BusinessException("Seu usuário não está vinculado a nenhuma Igreja.");
+        }
+
+        Long targetCongId;
+        if (callerCongId != null) {
             // Usuário de congregação (ex.: PASTOR_CONGREGACAO): só pode criar
             // usuários dentro da própria congregação — ignora qualquer valor do corpo.
-            targetChurchId = securityUtils.getEffectiveChurchId();
-            if (targetChurchId == null) {
-                throw new BusinessException("Seu usuário não está vinculado a nenhuma Igreja.");
-            }
             targetCongId = callerCongId;
         } else {
-            // Admin/pastor principal de Igreja (sem congregação própria) ou ROOT
-            // em modo filtrado: churchId vem do contexto; congregationId pode ser
-            // escolhido explicitamente, desde que pertença à própria Igreja.
-            targetChurchId = securityUtils.getEffectiveChurchId();
-            if (targetChurchId == null) {
-                throw new BusinessException("Seu usuário não está vinculado a nenhuma Igreja.");
+            if (TenantContext.isMainChurchAccessDenied()) {
+                throw new BusinessException("Selecione uma Congregação para continuar.");
             }
+            // Vínculo a uma Congregação específica é feito depois, via
+            // "Vincular Congregações" — não mais na criação do usuário.
             targetCongId = request.getCongregationId();
             if (targetCongId != null && !congregationRepository
                     .existsByOrganizationIdAndIdAndChurchId(orgId, targetCongId, targetChurchId)) {
@@ -246,6 +237,35 @@ public class UserService {
         userRepository.save(user);
     }
 
+    /**
+     * Admin redefine a senha de OUTRO usuário — sem exigir a senha atual dele
+     * (diferente de changePassword, que só troca a senha do próprio chamador).
+     * Escopado pelas mesmas regras de assertManageable.
+     *
+     * @return a senha gerada, quando {@code newPassword} não foi informado
+     *         (fluxo "gerar e mostrar"); {@code null} quando o chamador já
+     *         escolheu a nova senha explicitamente.
+     */
+    @Transactional
+    public String resetPassword(Long userId, String newPassword) {
+        User user = getManageableUser(userId);
+
+        boolean generated = newPassword == null || newPassword.isBlank();
+        String plainPassword = generated ? generateRandomPassword() : newPassword;
+        if (!generated && plainPassword.length() < 8) {
+            throw new BusinessException("Senha deve ter no mínimo 8 caracteres");
+        }
+
+        user.setPasswordHash(passwordEncoder.encode(plainPassword));
+        userRepository.save(user);
+        auditLogService.logAction("RESET_USER_PASSWORD", "USER", userId, null, Map.of());
+        return generated ? plainPassword : null;
+    }
+
+    private String generateRandomPassword() {
+        return java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+    }
+
     // ── Vínculos ──────────────────────────────────────────────────────────────
     // user_church_access / user_congregation_access concedem acesso ADICIONAL
     // (além da Igreja/Congregação primária do usuário). Só podem ser geridos
@@ -326,6 +346,25 @@ public class UserService {
         auditLogService.logAction("SET_USER_CONGREGATIONS", "USER", userId, null, congregationIds);
     }
 
+    /** Sem checagem de escopo — usado só por /auth/me, para o próprio usuário saber suas congregações vinculadas. */
+    public List<Long> getOwnLinkedCongregationIds(Long userId) {
+        return jdbcTemplate.queryForList(
+            "SELECT congregation_id FROM user_congregation_access WHERE user_id = ?", Long.class, userId);
+    }
+
+    public boolean getAccessMainChurch(Long userId) {
+        return getManageableUser(userId).isAccessMainChurch();
+    }
+
+    @Transactional
+    public void setAccessMainChurch(Long userId, boolean accessMainChurch) {
+        User user = getManageableUser(userId);
+        user.setAccessMainChurch(accessMainChurch);
+        userRepository.save(user);
+        auditLogService.logAction("SET_USER_ACCESS_MAIN_CHURCH", "USER", userId, null,
+            Map.of("accessMainChurch", accessMainChurch));
+    }
+
     // ── Permissões individuais ────────────────────────────────────────────────
 
     public List<String> getUserPermissions(Long userId) {
@@ -377,6 +416,11 @@ public class UserService {
         } else if (roleName != null && !roleName.isBlank()) {
             role = roleRepository.findByName(roleName.toUpperCase()).orElse(null);
         }
+        if (role == null) {
+            // Nenhum perfil informado: cai no perfil básico padrão em vez de
+            // deixar o usuário sem nenhuma role (ele logaria sem acessar nada).
+            role = roleRepository.findByName("USUARIO").orElse(null);
+        }
         if (role == null) return;
         assertRoleDelegatable(role);
         user.getRoles().add(role);
@@ -420,6 +464,12 @@ public class UserService {
             throw new BusinessException("Você não tem permissão para gerenciar este usuário.");
         }
         Long callerCongId = TenantContext.getCurrentCongregationId();
+        if (TenantContext.isMainChurchAccessDenied()) {
+            if (callerCongId == null || !callerCongId.equals(target.getCongregationId())) {
+                throw new BusinessException("Você não tem permissão para gerenciar este usuário.");
+            }
+            return;
+        }
         if (callerCongId != null && !securityUtils.isRoot()
                 && !callerCongId.equals(target.getCongregationId())) {
             throw new BusinessException("Você não tem permissão para gerenciar este usuário.");

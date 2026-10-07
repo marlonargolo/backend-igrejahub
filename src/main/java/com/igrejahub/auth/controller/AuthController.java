@@ -5,12 +5,14 @@ import com.igrejahub.auth.service.AuthenticationService;
 import com.igrejahub.auth.service.EmailVerificationService;
 import com.igrejahub.common.dto.ApiResponse;
 import com.igrejahub.common.exception.ResourceNotFoundException;
+import com.igrejahub.modules.service.ModuleService;
 import com.igrejahub.organizations.entity.Organization;
 import com.igrejahub.organizations.repository.OrganizationRepository;
 import com.igrejahub.security.UserPrincipal;
 import com.igrejahub.security.service.CustomUserDetailsService;
 import com.igrejahub.users.entity.User;
 import com.igrejahub.users.repository.UserRepository;
+import com.igrejahub.users.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -34,6 +36,8 @@ public class AuthController {
     private final UserRepository userRepository;
     private final OrganizationRepository organizationRepository;
     private final CustomUserDetailsService userDetailsService;
+    private final UserService userService;
+    private final ModuleService moduleService;
 
     @Operation(summary = "Login")
     @PostMapping("/login")
@@ -88,6 +92,11 @@ public class AuthController {
             .organizationName(organization != null ? organization.getName() : null)
             .churchId(user.getChurchId())
             .congregationId(user.getCongregationId())
+            .accessMainChurch(user.isAccessMainChurch())
+            .linkedCongregationIds(user.isAccessMainChurch()
+                ? java.util.List.of()
+                : userService.getOwnLinkedCongregationIds(user.getId()))
+            .enabledModules(moduleService.getEnabledModuleKeys(user.getChurchId()))
             .roles(user.getRoles().stream()
                 .map(r -> r.getName())
                 .collect(Collectors.toSet()))

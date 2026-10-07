@@ -8,12 +8,14 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.List;
 
 /**
  * Popula TenantContext a cada request autenticado.
@@ -32,6 +34,7 @@ import java.io.IOException;
 public class TenantIsolationFilter extends OncePerRequestFilter {
 
     private final CongregationRepository congregationRepository;
+    private final JdbcTemplate jdbcTemplate;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -73,6 +76,7 @@ public class TenantIsolationFilter extends OncePerRequestFilter {
                 // Igreja, um nível acima). Sem isso, todo módulo (Membros,
                 // Patrimônio, etc.) continuava filtrando só por churchId e
                 // devolvia os dados da Igreja inteira dentro da Congregação.
+                TenantContext.setMainChurchAccessDenied(false);
                 TenantContext.setCurrentCongregationId(
                     resolveEnteredCongregationId(request, user.getOrganizationId(), resolvedChurchId));
 
@@ -85,7 +89,16 @@ public class TenantIsolationFilter extends OncePerRequestFilter {
                     // Usuário fixo numa Congregação: JWT sempre prevalece, nunca
                     // pode ser sobrescrito por header.
                     TenantContext.setCurrentCongregationId(user.getCongregationId());
+                    TenantContext.setMainChurchAccessDenied(false);
+                } else if (!user.isAccessMainChurch()) {
+                    // Restrito às Congregações vinculadas (user_congregation_access) —
+                    // nunca pode ver a Igreja inteira, mesmo sem ter "entrado" ainda
+                    // numa Congregação específica.
+                    TenantContext.setMainChurchAccessDenied(true);
+                    TenantContext.setCurrentCongregationId(
+                        resolveRestrictedCongregationId(request, user));
                 } else {
+                    TenantContext.setMainChurchAccessDenied(false);
                     TenantContext.setCurrentCongregationId(
                         resolveEnteredCongregationId(request, user.getOrganizationId(), user.getChurchId()));
                 }
@@ -120,6 +133,34 @@ public class TenantIsolationFilter extends OncePerRequestFilter {
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    /**
+     * Usuário com accessMainChurch=false: só pode estar numa das Congregações
+     * em user_congregation_access — nunca pode ver a Igreja inteira. Se tiver
+     * só uma vinculada, resolve automaticamente; com mais de uma, precisa do
+     * header X-Congregation-Id (validado contra a própria lista de vínculos,
+     * não contra "pertence à mesma Igreja" como no caso do admin normal).
+     */
+    private Long resolveRestrictedCongregationId(HttpServletRequest request, UserPrincipal user) {
+        List<Long> linked = jdbcTemplate.queryForList(
+            "SELECT congregation_id FROM user_congregation_access WHERE user_id = ?",
+            Long.class, user.getId());
+        if (linked.isEmpty()) {
+            return null;
+        }
+
+        String header = request.getHeader("X-Congregation-Id");
+        if (header != null && !header.isBlank()) {
+            try {
+                Long requested = Long.parseLong(header.trim());
+                return linked.contains(requested) ? requested : null;
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+
+        return linked.size() == 1 ? linked.get(0) : null;
     }
 
     @Override
