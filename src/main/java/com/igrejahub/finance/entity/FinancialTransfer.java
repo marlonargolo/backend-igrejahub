@@ -15,6 +15,8 @@ import java.time.LocalDate;
 public class FinancialTransfer extends BaseEntity {
     @Column(name = "church_id")
     private Long churchId;
+    @Column(name = "to_church_id")
+    private Long toChurchId;
     @Column(name = "from_account_id", nullable = false)
     private Long fromAccountId;
     @Column(name = "to_account_id", nullable = false)

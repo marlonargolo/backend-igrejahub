@@ -10,6 +10,7 @@ import com.igrejahub.congregations.dto.UpdateCongregationRequest;
 import com.igrejahub.congregations.entity.Congregation;
 import com.igrejahub.congregations.mapper.CongregationMapper;
 import com.igrejahub.congregations.repository.CongregationRepository;
+import com.igrejahub.members.repository.MemberRepository;
 import com.igrejahub.security.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +32,7 @@ public class CongregationService {
     private final ChurchRepository       churchRepository;
     private final CongregationMapper     congregationMapper;
     private final SecurityUtils          securityUtils;
+    private final MemberRepository       memberRepository;
 
     // ── Listagem ──────────────────────────────────────────────────────────────
 
@@ -48,9 +50,9 @@ public class CongregationService {
             return search != null && !search.isEmpty()
                 ? congregationRepository
                     .findByOrganizationIdAndNameContainingIgnoreCase(orgId, search, pageable)
-                    .map(congregationMapper::toDto)
+                    .map(this::toDtoWithMemberCount)
                 : congregationRepository.findByOrganizationId(orgId, pageable)
-                    .map(congregationMapper::toDto);
+                    .map(this::toDtoWithMemberCount);
         }
 
         // Sem church_id efetivo → vazio
@@ -62,7 +64,7 @@ public class CongregationService {
             return congregationRepository.findByOrganizationIdAndId(orgId, userCongId)
                 .filter(c -> c.getChurchId().equals(filterChurchId))
                 .map(c -> (Page<CongregationDto>) new PageImpl<>(
-                    List.of(congregationMapper.toDto(c)), pageable, 1))
+                    List.of(toDtoWithMemberCount(c)), pageable, 1))
                 .orElse(Page.empty(pageable));
         }
 
@@ -71,10 +73,17 @@ public class CongregationService {
             ? congregationRepository
                 .findByOrganizationIdAndChurchIdAndNameContainingIgnoreCase(
                     orgId, filterChurchId, search, pageable)
-                .map(congregationMapper::toDto)
+                .map(this::toDtoWithMemberCount)
             : congregationRepository
                 .findByOrganizationIdAndChurchId(orgId, filterChurchId, pageable)
-                .map(congregationMapper::toDto);
+                .map(this::toDtoWithMemberCount);
+    }
+
+    /** Conta membros ATIVOS da Congregação (card "Dados por Congregação" do Dashboard). */
+    private CongregationDto toDtoWithMemberCount(Congregation c) {
+        CongregationDto dto = congregationMapper.toDto(c);
+        dto.setMemberCount(memberRepository.countByFilter(c.getOrganizationId(), "ATIVO", null, c.getId()));
+        return dto;
     }
 
     public CongregationDto getCongregation(Long id) {
@@ -83,7 +92,7 @@ public class CongregationService {
             .orElseThrow(() -> new ResourceNotFoundException("Congregation", id));
         if (!c.getOrganizationId().equals(orgId)) throw new BusinessException("Acesso não autorizado");
         if (!securityUtils.canViewAll()) assertAccess(c);
-        return congregationMapper.toDto(c);
+        return toDtoWithMemberCount(c);
     }
 
     // ── Criação ───────────────────────────────────────────────────────────────

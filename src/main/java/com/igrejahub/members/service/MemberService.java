@@ -54,8 +54,10 @@ public class MemberService {
                 .map(this::toDto);
         }
 
-        // Pastor de Congregação, ou ROOT/admin que "entrou" numa Congregação → só dela
-        if (effCongId != null) {
+        // Pastor de Congregação, ou ROOT/admin que "entrou" numa Congregação → só dela,
+        // a menos que tenha REPORT_VIEW_ALL (ex.: pastor responsável pela sede
+        // consultando relatórios de todas as Congregações da própria Igreja).
+        if (effCongId != null && !securityUtils.hasPermission("REPORT_VIEW_ALL")) {
             return memberRepository.findByCongregationId(orgId, effCongId, status, s, pageable)
                 .map(this::toDto);
         }

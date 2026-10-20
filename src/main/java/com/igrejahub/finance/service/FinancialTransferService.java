@@ -1,5 +1,6 @@
 package com.igrejahub.finance.service;
 
+import com.igrejahub.churches.repository.ChurchRepository;
 import com.igrejahub.common.exception.BusinessException;
 import com.igrejahub.common.tenant.TenantContext;
 import com.igrejahub.finance.dto.FinancialTransferDto;
@@ -28,6 +29,7 @@ public class FinancialTransferService {
     private final FinancialAccountService accountService;
     private final FinancialTransferMapper transferMapper;
     private final SecurityUtils securityUtils;
+    private final ChurchRepository churchRepository;
 
     public Page<FinancialTransferDto> getTransfers(Pageable pageable) {
         Long orgId = TenantContext.getCurrentTenant();
@@ -43,7 +45,9 @@ public class FinancialTransferService {
         }
         return page.map(t -> transferMapper.toDto(t,
                 accountService.getOwnedAccount(t.getFromAccountId()),
-                accountService.getOwnedAccount(t.getToAccountId())));
+                accountService.getOwnedAccount(t.getToAccountId()),
+                churchName(t.getChurchId()),
+                churchName(t.getToChurchId())));
     }
 
     @Transactional
@@ -54,7 +58,12 @@ public class FinancialTransferService {
         }
         FinancialAccount from = accountService.getOwnedAccount(fromAccountId);
         FinancialAccount to = accountService.getOwnedAccount(toAccountId);
-        if (!Objects.equals(from.getChurchId(), to.getChurchId())) {
+
+        // Transferência entre Igrejas diferentes: só quem enxerga todas as Igrejas
+        // (ROOT em modo global) pode movimentar entre contas de Igrejas distintas.
+        // Demais perfis já são barrados antes disso: getOwnedAccount() recusa
+        // acesso a uma conta de outra Igreja.
+        if (!Objects.equals(from.getChurchId(), to.getChurchId()) && !securityUtils.canViewAll()) {
             throw new BusinessException("Não é possível transferir entre contas de igrejas diferentes");
         }
         long cents = FinancialAccountMapper.amountToCents(amount);
@@ -64,6 +73,7 @@ public class FinancialTransferService {
 
         FinancialTransfer transfer = FinancialTransfer.builder()
                 .churchId(from.getChurchId())
+                .toChurchId(to.getChurchId())
                 .fromAccountId(fromAccountId)
                 .toAccountId(toAccountId)
                 .amountCents(cents)
@@ -73,6 +83,11 @@ public class FinancialTransferService {
                 .build();
         transfer.setOrganizationId(TenantContext.getCurrentTenant());
         transfer = transferRepository.save(transfer);
-        return transferMapper.toDto(transfer, from, to);
+        return transferMapper.toDto(transfer, from, to, churchName(from.getChurchId()), churchName(to.getChurchId()));
+    }
+
+    private String churchName(Long churchId) {
+        if (churchId == null) return null;
+        return churchRepository.findById(churchId).map(c -> c.getName()).orElse(null);
     }
 }

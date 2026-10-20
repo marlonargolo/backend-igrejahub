@@ -9,8 +9,12 @@ public class FinancialTransferDto {
     private Long id;
     private Long fromAccountId;
     private String fromAccountName;
+    private Long fromChurchId;
+    private String fromChurchName;
     private Long toAccountId;
     private String toAccountName;
+    private Long toChurchId;
+    private String toChurchName;
     private BigDecimal amount;
     private LocalDate transferDate;
     private String description;

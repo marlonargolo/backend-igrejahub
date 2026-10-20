@@ -23,4 +23,5 @@ public class CongregationDto {
     private String status;
     private Double latitude;
     private Double longitude;
+    private Long memberCount;
 }
