@@ -86,6 +86,27 @@ class MemberServiceIsolationTest {
     }
 
     @Test
+    void getMembers_congregationScoped_withReportViewAll_seesWholeChurch() {
+        // Pastor responsável pela sede, com REPORT_VIEW_ALL: mesmo "dentro" de
+        // uma Congregação específica, consegue consultar relatórios da Igreja
+        // toda (não fica preso à Congregação em que está).
+        TenantContext.setCurrentTenant(1L);
+        TenantContext.setCurrentCongregationId(100L);
+        Pageable pageable = PageRequest.of(0, 20);
+
+        when(securityUtils.canViewAll()).thenReturn(false);
+        when(securityUtils.hasPermission("REPORT_VIEW_ALL")).thenReturn(true);
+        when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
+        when(memberRepository.findByChurchId(eq(1L), eq(10L), any(), any(), any(), eq(pageable)))
+            .thenReturn(Page.empty(pageable));
+
+        newService().getMembers(pageable, null, null, null, null);
+
+        verify(memberRepository).findByChurchId(eq(1L), eq(10L), any(), any(), any(), eq(pageable));
+        verify(memberRepository, never()).findByCongregationId(any(), any(), any(), any(), any());
+    }
+
+    @Test
     void getMembers_restrictedWithoutResolvedCongregation_returnsEmpty_neverWholeChurch() {
         // Usuário com accessMainChurch=false e mais de uma Congregação vinculada,
         // sem ter escolhido nenhuma ainda (TenantIsolationFilter manda congId=null

@@ -61,7 +61,7 @@ public class AdminController {
             "AND (?::bigint IS NULL OR u.church_id=?) GROUP BY r.name ORDER BY r.name",
             orgId, churchId, churchId));
         stats.put("activeMembers", q1(
-            "SELECT COUNT(*) FROM members WHERE organization_id=? AND status='ACTIVE' AND (deleted IS NULL OR deleted=false) " +
+            "SELECT COUNT(*) FROM members WHERE organization_id=? AND status='ATIVO' AND (deleted IS NULL OR deleted=false) " +
             "AND (?::bigint IS NULL OR church_id=?)", orgId, churchId, churchId));
         stats.put("transactionsThisPeriod", q1(
             "SELECT COUNT(*) FROM financial_transactions WHERE organization_id=? AND transaction_date>=? " +
@@ -146,7 +146,7 @@ public class AdminController {
         long congs      = q1("SELECT COUNT(*) FROM congregations WHERE organization_id=? AND church_id=? AND (deleted IS NULL OR deleted=false)", orgId, id);
         long users      = q1("SELECT COUNT(*) FROM users WHERE organization_id=? AND church_id=? AND (deleted IS NULL OR deleted=false)", orgId, id);
         long members    = q1("SELECT COUNT(*) FROM members WHERE organization_id=? AND church_id=? AND (deleted IS NULL OR deleted=false)", orgId, id);
-        long activeMembers = q1("SELECT COUNT(*) FROM members WHERE organization_id=? AND church_id=? AND status='ACTIVE' AND (deleted IS NULL OR deleted=false)", orgId, id);
+        long activeMembers = q1("SELECT COUNT(*) FROM members WHERE organization_id=? AND church_id=? AND status='ATIVO' AND (deleted IS NULL OR deleted=false)", orgId, id);
         long docs       = q1("SELECT COUNT(*) FROM documents WHERE organization_id=? AND church_id=? AND (deleted IS NULL OR deleted=false)", orgId, id);
         long transactionsThisMonth = q1(
             "SELECT COUNT(*) FROM financial_transactions WHERE organization_id=? AND church_id=? " +

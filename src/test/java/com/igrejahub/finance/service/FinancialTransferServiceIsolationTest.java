@@ -1,14 +1,18 @@
 package com.igrejahub.finance.service;
 
+import com.igrejahub.churches.entity.Church;
+import com.igrejahub.churches.repository.ChurchRepository;
 import com.igrejahub.common.exception.BusinessException;
 import com.igrejahub.common.tenant.TenantContext;
 import com.igrejahub.finance.entity.FinancialAccount;
+import com.igrejahub.finance.entity.FinancialTransfer;
 import com.igrejahub.finance.mapper.FinancialTransferMapper;
 import com.igrejahub.finance.repository.FinancialTransferRepository;
 import com.igrejahub.security.SecurityUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
@@ -17,7 +21,9 @@ import org.springframework.data.domain.Pageable;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.*;
 
@@ -28,6 +34,7 @@ class FinancialTransferServiceIsolationTest {
     @Mock private FinancialAccountService accountService;
     @Mock private FinancialTransferMapper transferMapper;
     @Mock private SecurityUtils securityUtils;
+    @Mock private ChurchRepository churchRepository;
 
     private final Pageable pageable = PageRequest.of(0, 20);
 
@@ -35,7 +42,7 @@ class FinancialTransferServiceIsolationTest {
     void clearContext() { TenantContext.clear(); }
 
     private FinancialTransferService newService() {
-        return new FinancialTransferService(transferRepository, accountService, transferMapper, securityUtils);
+        return new FinancialTransferService(transferRepository, accountService, transferMapper, securityUtils, churchRepository);
     }
 
     @Test
@@ -64,16 +71,39 @@ class FinancialTransferServiceIsolationTest {
     }
 
     @Test
-    void createTransfer_betweenDifferentChurches_isRejected() {
+    void createTransfer_betweenDifferentChurches_nonRoot_isRejected() {
         FinancialAccount from = FinancialAccount.builder().churchId(10L).build();
         from.setId(1L);
         FinancialAccount to = FinancialAccount.builder().churchId(20L).build();
         to.setId(2L);
         when(accountService.getOwnedAccount(1L)).thenReturn(from);
         when(accountService.getOwnedAccount(2L)).thenReturn(to);
+        when(securityUtils.canViewAll()).thenReturn(false);
 
         FinancialTransferService service = newService();
         assertThrows(BusinessException.class, () -> service.createTransfer(
             1L, 2L, BigDecimal.TEN, LocalDate.now(), "teste"));
+    }
+
+    @Test
+    void createTransfer_betweenDifferentChurches_root_isAllowedAndRecordsBothChurches() {
+        FinancialAccount from = FinancialAccount.builder().churchId(10L).build();
+        from.setId(1L);
+        FinancialAccount to = FinancialAccount.builder().churchId(20L).build();
+        to.setId(2L);
+        when(accountService.getOwnedAccount(1L)).thenReturn(from);
+        when(accountService.getOwnedAccount(2L)).thenReturn(to);
+        when(securityUtils.canViewAll()).thenReturn(true);
+        when(churchRepository.findById(10L)).thenReturn(Optional.of(Church.builder().name("Igreja A").build()));
+        when(churchRepository.findById(20L)).thenReturn(Optional.of(Church.builder().name("Igreja B").build()));
+        when(transferRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        newService().createTransfer(1L, 2L, BigDecimal.TEN, LocalDate.now(), "teste");
+
+        ArgumentCaptor<FinancialTransfer> captor = ArgumentCaptor.forClass(FinancialTransfer.class);
+        verify(transferRepository).save(captor.capture());
+        assertEquals(10L, captor.getValue().getChurchId());
+        assertEquals(20L, captor.getValue().getToChurchId());
+        verify(transferMapper).toDto(any(), eq(from), eq(to), eq("Igreja A"), eq("Igreja B"));
     }
 }
