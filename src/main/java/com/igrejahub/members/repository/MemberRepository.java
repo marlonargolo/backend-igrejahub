@@ -23,7 +23,7 @@ public interface MemberRepository extends BaseRepository<Member, Long> {
     @Query("SELECT m FROM Member m WHERE m.organizationId = :orgId " +
            "AND (:churchId IS NULL OR m.churchId = :churchId) " +
            "AND (:congregationId IS NULL OR m.congregationId = :congregationId) " +
-           "AND (:status IS NULL OR UPPER(m.status) = UPPER(:status)) " +
+           "AND (:status IS NULL OR UPPER(m.status) = UPPER(CAST(:status AS string))) " +
            "AND (:search IS NULL OR LOWER(m.name) LIKE LOWER(CAST(:search AS string)))")
     Page<Member> search(@Param("orgId") Long orgId,
                         @Param("churchId") Long churchId,
@@ -32,7 +32,7 @@ public interface MemberRepository extends BaseRepository<Member, Long> {
                         @Param("search") String search,
                         Pageable pageable);
 
-    @Query("SELECT COUNT(m) FROM Member m WHERE m.organizationId = :orgId AND UPPER(m.status) = UPPER(:status) " +
+    @Query("SELECT COUNT(m) FROM Member m WHERE m.organizationId = :orgId AND UPPER(m.status) = UPPER(CAST(:status AS string)) " +
            "AND (:churchId IS NULL OR m.churchId = :churchId) " +
            "AND (:congregationId IS NULL OR m.congregationId = :congregationId)")
     long countByFilter(@Param("orgId") Long orgId,
@@ -44,7 +44,7 @@ public interface MemberRepository extends BaseRepository<Member, Long> {
     @Query("SELECT m FROM Member m WHERE m.organizationId = :orgId " +
            "AND m.churchId = :churchId " +
            "AND (:congregationId IS NULL OR m.congregationId = :congregationId) " +
-           "AND (:status IS NULL OR UPPER(m.status) = UPPER(:status)) " +
+           "AND (:status IS NULL OR UPPER(m.status) = UPPER(CAST(:status AS string))) " +
            "AND (:search IS NULL OR LOWER(m.name) LIKE LOWER(CAST(:search AS string)))")
     Page<Member> findByChurchId(@Param("orgId") Long orgId,
                                 @Param("churchId") Long churchId,
@@ -58,7 +58,7 @@ public interface MemberRepository extends BaseRepository<Member, Long> {
     //    nenhuma congregação específica foi escolhida no filtro. ───────────────
     @Query("SELECT m FROM Member m WHERE m.organizationId = :orgId " +
            "AND m.churchId = :churchId AND m.congregationId IS NULL " +
-           "AND (:status IS NULL OR UPPER(m.status) = UPPER(:status)) " +
+           "AND (:status IS NULL OR UPPER(m.status) = UPPER(CAST(:status AS string))) " +
            "AND (:search IS NULL OR LOWER(m.name) LIKE LOWER(CAST(:search AS string)))")
     Page<Member> findLocalByChurchId(@Param("orgId") Long orgId,
                                      @Param("churchId") Long churchId,
@@ -69,7 +69,7 @@ public interface MemberRepository extends BaseRepository<Member, Long> {
     // ── Busca por congregação (pastor de congregação) ─────────────────────────
     @Query("SELECT m FROM Member m WHERE m.organizationId = :orgId " +
            "AND m.congregationId = :congregationId " +
-           "AND (:status IS NULL OR UPPER(m.status) = UPPER(:status)) " +
+           "AND (:status IS NULL OR UPPER(m.status) = UPPER(CAST(:status AS string))) " +
            "AND (:search IS NULL OR LOWER(m.name) LIKE LOWER(CAST(:search AS string)))")
     Page<Member> findByCongregationId(@Param("orgId") Long orgId,
                                       @Param("congregationId") Long congregationId,
@@ -79,7 +79,7 @@ public interface MemberRepository extends BaseRepository<Member, Long> {
 
     // ── ROOT modo global: todos da organização ────────────────────────────────
     @Query("SELECT m FROM Member m WHERE m.organizationId = :orgId " +
-           "AND (:status IS NULL OR UPPER(m.status) = UPPER(:status)) " +
+           "AND (:status IS NULL OR UPPER(m.status) = UPPER(CAST(:status AS string))) " +
            "AND (:search IS NULL OR LOWER(m.name) LIKE LOWER(CAST(:search AS string)))")
     Page<Member> findAllByOrganization(@Param("orgId") Long orgId,
                                        @Param("status") String status,
