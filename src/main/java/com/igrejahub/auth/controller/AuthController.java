@@ -93,9 +93,10 @@ public class AuthController {
             .churchId(user.getChurchId())
             .congregationId(user.getCongregationId())
             .accessMainChurch(user.isAccessMainChurch())
-            .linkedCongregationIds(user.isAccessMainChurch()
-                ? java.util.List.of()
-                : userService.getOwnLinkedCongregationIds(user.getId()))
+            // Sempre devolvido, independente de accessMainChurch: autorizar a sede
+            // não concede entrada automática em todas as Congregações — o front
+            // precisa saber exatamente quais foram vinculadas em qualquer caso.
+            .linkedCongregationIds(userService.getOwnLinkedCongregationIds(user.getId()))
             .enabledModules(moduleService.getEnabledModuleKeys(user.getChurchId()))
             .roles(user.getRoles().stream()
                 .map(r -> r.getName())

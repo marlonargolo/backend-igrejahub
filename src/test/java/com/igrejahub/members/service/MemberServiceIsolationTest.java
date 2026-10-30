@@ -23,6 +23,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -69,41 +70,91 @@ class MemberServiceIsolationTest {
     }
 
     @Test
-    void getMembers_rootInsideChurchOnly_stillSeesWholeChurch() {
+    void getMembers_sedeDefault_localOnly_doesNotMixCongregationMembers() {
+        // Secretaria → Membros, na sede, sem Congregação escolhida no filtro:
+        // precisa trazer só quem está DIRETAMENTE na sede (congregationId NULL),
+        // nunca misturar com quem já foi transferido para uma Congregação.
         TenantContext.setCurrentTenant(1L);
         TenantContext.setCurrentCongregationId(null);
         Pageable pageable = PageRequest.of(0, 20);
 
         when(securityUtils.canViewAll()).thenReturn(false);
         when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
-        when(memberRepository.findByChurchId(eq(1L), eq(10L), any(), any(), any(), eq(pageable)))
+        when(memberRepository.findLocalByChurchId(eq(1L), eq(10L), any(), any(), eq(pageable)))
             .thenReturn(Page.empty(pageable));
 
         newService().getMembers(pageable, null, null, null, null);
 
-        verify(memberRepository).findByChurchId(eq(1L), eq(10L), any(), any(), any(), eq(pageable));
+        verify(memberRepository).findLocalByChurchId(eq(1L), eq(10L), any(), any(), eq(pageable));
+        verify(memberRepository, never()).findByChurchId(any(), any(), any(), any(), any(), any());
         verify(memberRepository, never()).findByCongregationId(any(), any(), any(), any(), any());
     }
 
     @Test
-    void getMembers_congregationScoped_withReportViewAll_seesWholeChurch() {
-        // Pastor responsável pela sede, com REPORT_VIEW_ALL: mesmo "dentro" de
-        // uma Congregação específica, consegue consultar relatórios da Igreja
-        // toda (não fica preso à Congregação em que está).
+    void getMembers_sedeExplicitCongregationId_drillsDownToThatCongregation() {
+        TenantContext.setCurrentTenant(1L);
+        TenantContext.setCurrentCongregationId(null);
+        Pageable pageable = PageRequest.of(0, 20);
+
+        when(securityUtils.canViewAll()).thenReturn(false);
+        when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
+        when(memberRepository.findByChurchId(eq(1L), eq(10L), eq(200L), any(), any(), eq(pageable)))
+            .thenReturn(Page.empty(pageable));
+
+        newService().getMembers(pageable, null, 200L, null, null);
+
+        verify(memberRepository).findByChurchId(eq(1L), eq(10L), eq(200L), any(), any(), eq(pageable));
+        verify(memberRepository, never()).findLocalByChurchId(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void getMembers_sedeReportScopeWithPermission_seesConsolidatedChurch() {
+        TenantContext.setCurrentTenant(1L);
+        TenantContext.setCurrentCongregationId(null);
+        Pageable pageable = PageRequest.of(0, 20);
+
+        when(securityUtils.canViewAll()).thenReturn(false);
+        when(securityUtils.hasPermission("REPORT_VIEW")).thenReturn(true);
+        when(securityUtils.hasPermission("REPORT_VIEW_ALL")).thenReturn(true);
+        when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
+        when(memberRepository.findByChurchId(eq(1L), eq(10L), isNull(), any(), any(), eq(pageable)))
+            .thenReturn(Page.empty(pageable));
+
+        newService().getMembers(pageable, null, null, null, null, true);
+
+        verify(memberRepository).findByChurchId(eq(1L), eq(10L), isNull(), any(), any(), eq(pageable));
+        verify(memberRepository, never()).findLocalByChurchId(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void getMembers_reportScope_withoutPermission_throws() {
+        TenantContext.setCurrentTenant(1L);
+        when(securityUtils.isRoot()).thenReturn(false);
+        when(securityUtils.hasPermission("REPORT_VIEW")).thenReturn(false);
+
+        org.junit.jupiter.api.Assertions.assertThrows(
+            com.igrejahub.common.exception.BusinessException.class,
+            () -> newService().getMembers(PageRequest.of(0, 20), null, null, null, null, true));
+    }
+
+    @Test
+    void getMembers_congregationScoped_reportScopeNeverEscapesTheCongregation() {
+        // Mesmo com REPORT_VIEW_ALL e reportScope=true, estar DENTRO de uma
+        // Congregação restringe sempre a ela — relatório consolidado da sede
+        // e entrada operacional numa Congregação são capacidades diferentes.
         TenantContext.setCurrentTenant(1L);
         TenantContext.setCurrentCongregationId(100L);
         Pageable pageable = PageRequest.of(0, 20);
 
         when(securityUtils.canViewAll()).thenReturn(false);
-        when(securityUtils.hasPermission("REPORT_VIEW_ALL")).thenReturn(true);
-        when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
-        when(memberRepository.findByChurchId(eq(1L), eq(10L), any(), any(), any(), eq(pageable)))
+        when(securityUtils.hasPermission("REPORT_VIEW")).thenReturn(true);
+        when(memberRepository.findByCongregationId(eq(1L), eq(100L), any(), any(), eq(pageable)))
             .thenReturn(Page.empty(pageable));
 
-        newService().getMembers(pageable, null, null, null, null);
+        newService().getMembers(pageable, null, null, null, null, true);
 
-        verify(memberRepository).findByChurchId(eq(1L), eq(10L), any(), any(), any(), eq(pageable));
-        verify(memberRepository, never()).findByCongregationId(any(), any(), any(), any(), any());
+        verify(memberRepository).findByCongregationId(eq(1L), eq(100L), any(), any(), eq(pageable));
+        verify(memberRepository, never()).findByChurchId(any(), any(), any(), any(), any(), any());
     }
 
     @Test

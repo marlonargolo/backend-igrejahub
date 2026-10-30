@@ -3,6 +3,7 @@ package com.igrejahub.finance.service;
 import com.igrejahub.churches.repository.ChurchRepository;
 import com.igrejahub.common.exception.BusinessException;
 import com.igrejahub.common.tenant.TenantContext;
+import com.igrejahub.congregations.repository.CongregationRepository;
 import com.igrejahub.finance.entity.FinancialAccount;
 import com.igrejahub.finance.mapper.FinancialAccountMapper;
 import com.igrejahub.finance.repository.FinancialAccountRepository;
@@ -29,6 +30,7 @@ class FinancialAccountServiceIsolationTest {
     @Mock private FinancialAccountMapper accountMapper;
     @Mock private SecurityUtils securityUtils;
     @Mock private ChurchRepository churchRepository;
+    @Mock private CongregationRepository congregationRepository;
 
     private final Pageable pageable = PageRequest.of(0, 20);
 
@@ -36,7 +38,7 @@ class FinancialAccountServiceIsolationTest {
     void clearContext() { TenantContext.clear(); }
 
     private FinancialAccountService newService() {
-        return new FinancialAccountService(accountRepository, accountMapper, securityUtils, churchRepository);
+        return new FinancialAccountService(accountRepository, accountMapper, securityUtils, churchRepository, congregationRepository);
     }
 
     @Test
@@ -104,5 +106,60 @@ class FinancialAccountServiceIsolationTest {
             org.mockito.ArgumentCaptor.forClass(FinancialAccount.class);
         verify(accountRepository).save(captor.capture());
         assertEquals(10L, captor.getValue().getChurchId());
+        assertNull(captor.getValue().getCongregationId());
+    }
+
+    @Test
+    void createAccount_enteredInCongregation_accountBelongsToThatCongregation() {
+        TenantContext.setCurrentTenant(1L);
+        TenantContext.setCurrentCongregationId(200L);
+        when(securityUtils.canViewAll()).thenReturn(false);
+        when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
+        when(accountRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        newService().createAccount("Caixa Paranaguá", "CASH", null, null, null,
+            java.math.BigDecimal.ZERO, null);
+
+        org.mockito.ArgumentCaptor<FinancialAccount> captor =
+            org.mockito.ArgumentCaptor.forClass(FinancialAccount.class);
+        verify(accountRepository).save(captor.capture());
+        assertEquals(10L, captor.getValue().getChurchId());
+        assertEquals(200L, captor.getValue().getCongregationId());
+    }
+
+    @Test
+    void getActiveAccountsForUnit_noCongregation_returnsSedeLocalAccounts() {
+        TenantContext.setCurrentTenant(1L);
+        when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
+        when(accountRepository.findByOrganizationIdAndChurchIdAndCongregationIdIsNullAndActiveTrue(1L, 10L))
+            .thenReturn(java.util.List.of());
+
+        newService().getActiveAccountsForUnit(null);
+
+        verify(accountRepository).findByOrganizationIdAndChurchIdAndCongregationIdIsNullAndActiveTrue(1L, 10L);
+        verify(accountRepository, never()).findByOrganizationIdAndCongregationIdAndActiveTrue(any(), any());
+    }
+
+    @Test
+    void getActiveAccountsForUnit_validCongregationOfCurrentChurch_returnsItsAccounts() {
+        TenantContext.setCurrentTenant(1L);
+        when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
+        when(congregationRepository.existsByOrganizationIdAndIdAndChurchId(1L, 200L, 10L)).thenReturn(true);
+        when(accountRepository.findByOrganizationIdAndCongregationIdAndActiveTrue(1L, 200L))
+            .thenReturn(java.util.List.of());
+
+        newService().getActiveAccountsForUnit(200L);
+
+        verify(accountRepository).findByOrganizationIdAndCongregationIdAndActiveTrue(1L, 200L);
+    }
+
+    @Test
+    void getActiveAccountsForUnit_congregationFromAnotherChurch_isRejected() {
+        TenantContext.setCurrentTenant(1L);
+        when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
+        when(congregationRepository.existsByOrganizationIdAndIdAndChurchId(1L, 999L, 10L)).thenReturn(false);
+
+        FinancialAccountService service = newService();
+        assertThrows(BusinessException.class, () -> service.getActiveAccountsForUnit(999L));
     }
 }

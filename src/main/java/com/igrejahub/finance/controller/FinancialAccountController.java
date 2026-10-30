@@ -3,6 +3,7 @@ package com.igrejahub.finance.controller;
 import com.igrejahub.common.dto.ApiResponse;
 import com.igrejahub.finance.dto.FinancialAccountDto;
 import com.igrejahub.finance.service.FinancialAccountService;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -36,6 +37,14 @@ public class FinancialAccountController {
     @PreAuthorize("hasPermission(null, 'FINANCE_VIEW')")
     public ResponseEntity<ApiResponse<List<FinancialAccountDto>>> getActiveAccounts() {
         return ResponseEntity.ok(ApiResponse.success(accountService.getActiveAccounts()));
+    }
+
+    @Operation(summary = "Contas ativas de uma unidade (sede ou Congregação) da Igreja em operação")
+    @GetMapping("/by-unit")
+    @PreAuthorize("hasPermission(null, 'FINANCE_VIEW')")
+    public ResponseEntity<ApiResponse<List<FinancialAccountDto>>> getActiveAccountsForUnit(
+            @RequestParam(required = false) Long congregationId) {
+        return ResponseEntity.ok(ApiResponse.success(accountService.getActiveAccountsForUnit(congregationId)));
     }
 
     @GetMapping("/{id}")

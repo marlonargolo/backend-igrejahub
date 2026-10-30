@@ -53,6 +53,19 @@ public interface MemberRepository extends BaseRepository<Member, Long> {
                                 @Param("search") String search,
                                 Pageable pageable);
 
+    // ── Listagem local da sede: só membros SEM congregação (não mistura as
+    //    congregações da Igreja). Usada pela tela Secretaria → Membros quando
+    //    nenhuma congregação específica foi escolhida no filtro. ───────────────
+    @Query("SELECT m FROM Member m WHERE m.organizationId = :orgId " +
+           "AND m.churchId = :churchId AND m.congregationId IS NULL " +
+           "AND (:status IS NULL OR UPPER(m.status) = UPPER(:status)) " +
+           "AND (:search IS NULL OR LOWER(m.name) LIKE LOWER(CAST(:search AS string)))")
+    Page<Member> findLocalByChurchId(@Param("orgId") Long orgId,
+                                     @Param("churchId") Long churchId,
+                                     @Param("status") String status,
+                                     @Param("search") String search,
+                                     Pageable pageable);
+
     // ── Busca por congregação (pastor de congregação) ─────────────────────────
     @Query("SELECT m FROM Member m WHERE m.organizationId = :orgId " +
            "AND m.congregationId = :congregationId " +

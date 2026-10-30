@@ -1,5 +1,6 @@
 package com.igrejahub.support.service;
 
+import com.igrejahub.churches.repository.ChurchRepository;
 import com.igrejahub.common.exception.BusinessException;
 import com.igrejahub.common.exception.ResourceNotFoundException;
 import com.igrejahub.common.tenant.TenantContext;
@@ -45,6 +46,7 @@ public class SupportService {
     private final SupportMessageRepository messageRepo;
     private final NotificationService notificationService;
     private final SecurityUtils securityUtils;
+    private final ChurchRepository churchRepository;
 
     // ── Identity helpers ──────────────────────────────────────────────────────
 
@@ -227,6 +229,9 @@ public class SupportService {
             .findByTicketIdOrderByCreatedAtAsc(t.getId())
             .stream().map(this::toMessageDto).collect(Collectors.toList());
 
+        String churchName = t.getChurchId() == null ? null
+            : churchRepository.findById(t.getChurchId()).map(c -> c.getName()).orElse(null);
+
         return SupportTicketDto.builder()
             .id(t.getId())
             .organizationId(t.getOrganizationId())
@@ -236,6 +241,8 @@ public class SupportService {
             .priority(t.getPriority())
             .status(t.getStatus())
             .criadoEm(t.getCreatedAt())
+            .churchId(t.getChurchId())
+            .churchName(churchName)
             .mensagens(msgs)
             .build();
     }

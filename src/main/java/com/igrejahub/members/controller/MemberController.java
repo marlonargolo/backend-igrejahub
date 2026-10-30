@@ -58,9 +58,10 @@ public class MemberController {
             @RequestParam(required = false) Long churchId,
             @RequestParam(required = false) Long congregationId,
             @RequestParam(required = false) String status,
-            @RequestParam(required = false) String search) {
+            @RequestParam(required = false) String search,
+            @RequestParam(defaultValue = "false") boolean reportScope) {
 
-        Page<MemberDto> page = memberService.getMembers(pageable, churchId, congregationId, status, search);
+        Page<MemberDto> page = memberService.getMembers(pageable, churchId, congregationId, status, search, reportScope);
 
         PaginatedResponse<MemberDto> response = PaginatedResponse.<MemberDto>builder()
             .data(page.getContent())

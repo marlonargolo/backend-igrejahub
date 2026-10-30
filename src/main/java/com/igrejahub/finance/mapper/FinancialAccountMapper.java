@@ -12,6 +12,7 @@ public class FinancialAccountMapper {
         return FinancialAccountDto.builder()
                 .id(entity.getId())
                 .churchId(entity.getChurchId())
+                .congregationId(entity.getCongregationId())
                 .name(entity.getName())
                 .type(entity.getType().name())
                 .bankName(entity.getBankName())

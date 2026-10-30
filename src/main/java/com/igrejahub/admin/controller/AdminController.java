@@ -60,21 +60,27 @@ public class AdminController {
             "WHERE u.organization_id=? AND (u.deleted IS NULL OR u.deleted=false) " +
             "AND (?::bigint IS NULL OR u.church_id=?) GROUP BY r.name ORDER BY r.name",
             orgId, churchId, churchId));
-        stats.put("activeMembers", q1(
+        // Nomes das chaves abaixo têm que bater exatamente com a interface
+        // AdminStats do frontend (admin.service.ts) — era aqui que estava a
+        // causa dos indicadores "undefined"/"NaN" no Painel Geral: o backend
+        // devolvia activeMembers/transactionsThisPeriod/consolidatedBalanceCents/
+        // openSupportTickets, e o frontend procurava por members/transactions/
+        // balance/supportTicketsOpen, que nunca existiam no objeto.
+        stats.put("members", q1(
             "SELECT COUNT(*) FROM members WHERE organization_id=? AND status='ATIVO' AND (deleted IS NULL OR deleted=false) " +
             "AND (?::bigint IS NULL OR church_id=?)", orgId, churchId, churchId));
-        stats.put("transactionsThisPeriod", q1(
+        stats.put("transactions", q1(
             "SELECT COUNT(*) FROM financial_transactions WHERE organization_id=? AND transaction_date>=? " +
             "AND (deleted IS NULL OR deleted=false) AND (?::bigint IS NULL OR church_id=?)",
             orgId, monthStart, churchId, churchId));
-        stats.put("consolidatedBalanceCents", q1(
+        stats.put("balance", java.math.BigDecimal.valueOf(q1(
             "SELECT COALESCE(SUM(current_balance_cents),0) FROM finance_accounts WHERE organization_id=? " +
             "AND active=true AND (deleted IS NULL OR deleted=false) AND (?::bigint IS NULL OR church_id=?)",
-            orgId, churchId, churchId));
+            orgId, churchId, churchId), 2));
         stats.put("documents", q1(
             "SELECT COUNT(*) FROM documents WHERE organization_id=? AND (deleted IS NULL OR deleted=false) " +
             "AND (?::bigint IS NULL OR church_id=?)", orgId, churchId, churchId));
-        stats.put("openSupportTickets", q1(
+        stats.put("supportTicketsOpen", q1(
             "SELECT COUNT(*) FROM support_tickets WHERE organization_id=? AND status NOT IN ('FECHADO','RESOLVIDO') " +
             "AND (?::bigint IS NULL OR church_id=?)", orgId, churchId, churchId));
         return ResponseEntity.ok(ApiResponse.success(stats));
