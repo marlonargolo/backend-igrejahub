@@ -7,6 +7,8 @@ public class FinancialAccountDto {
     private Long id;
     private Long churchId;
     private String churchName;
+    private Long congregationId;
+    private String congregationName;
     private String name;
     private String type;
     private String bankName;

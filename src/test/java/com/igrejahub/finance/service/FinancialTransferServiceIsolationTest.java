@@ -78,24 +78,42 @@ class FinancialTransferServiceIsolationTest {
         to.setId(2L);
         when(accountService.getOwnedAccount(1L)).thenReturn(from);
         when(accountService.getOwnedAccount(2L)).thenReturn(to);
-        when(securityUtils.canViewAll()).thenReturn(false);
 
         FinancialTransferService service = newService();
         assertThrows(BusinessException.class, () -> service.createTransfer(
             1L, 2L, BigDecimal.TEN, LocalDate.now(), "teste"));
+        verify(transferRepository, never()).save(any());
     }
 
     @Test
-    void createTransfer_betweenDifferentChurches_root_isAllowedAndRecordsBothChurches() {
+    void createTransfer_betweenDifferentChurches_root_isAlsoRejected() {
+        // A capacidade administrativa de ROOT enxergar várias Igrejas não pode
+        // transformar esta tela numa transferência entre instituições
+        // independentes — a restrição à mesma Igreja vale para todo mundo.
         FinancialAccount from = FinancialAccount.builder().churchId(10L).build();
         from.setId(1L);
         FinancialAccount to = FinancialAccount.builder().churchId(20L).build();
         to.setId(2L);
         when(accountService.getOwnedAccount(1L)).thenReturn(from);
         when(accountService.getOwnedAccount(2L)).thenReturn(to);
-        when(securityUtils.canViewAll()).thenReturn(true);
-        when(churchRepository.findById(10L)).thenReturn(Optional.of(Church.builder().name("Igreja A").build()));
-        when(churchRepository.findById(20L)).thenReturn(Optional.of(Church.builder().name("Igreja B").build()));
+
+        FinancialTransferService service = newService();
+        assertThrows(BusinessException.class, () -> service.createTransfer(
+            1L, 2L, BigDecimal.TEN, LocalDate.now(), "teste"));
+        verify(transferRepository, never()).save(any());
+    }
+
+    @Test
+    void createTransfer_sedeToCongregationOfSameChurch_isAllowed() {
+        // Mesma Igreja (mesmo churchId), sede (congregationId null) → Congregação
+        // (congregationId preenchido): deve funcionar normalmente.
+        FinancialAccount from = FinancialAccount.builder().churchId(10L).congregationId(null).build();
+        from.setId(1L);
+        FinancialAccount to = FinancialAccount.builder().churchId(10L).congregationId(200L).build();
+        to.setId(2L);
+        when(accountService.getOwnedAccount(1L)).thenReturn(from);
+        when(accountService.getOwnedAccount(2L)).thenReturn(to);
+        when(churchRepository.findById(10L)).thenReturn(Optional.of(Church.builder().name("Vale da Bênção").build()));
         when(transferRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         newService().createTransfer(1L, 2L, BigDecimal.TEN, LocalDate.now(), "teste");
@@ -103,7 +121,6 @@ class FinancialTransferServiceIsolationTest {
         ArgumentCaptor<FinancialTransfer> captor = ArgumentCaptor.forClass(FinancialTransfer.class);
         verify(transferRepository).save(captor.capture());
         assertEquals(10L, captor.getValue().getChurchId());
-        assertEquals(20L, captor.getValue().getToChurchId());
-        verify(transferMapper).toDto(any(), eq(from), eq(to), eq("Igreja A"), eq("Igreja B"));
+        assertEquals(10L, captor.getValue().getToChurchId());
     }
 }

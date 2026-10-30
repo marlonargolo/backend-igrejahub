@@ -4,6 +4,7 @@ import com.igrejahub.churches.repository.ChurchRepository;
 import com.igrejahub.common.exception.BusinessException;
 import com.igrejahub.common.exception.ResourceNotFoundException;
 import com.igrejahub.common.tenant.TenantContext;
+import com.igrejahub.congregations.repository.CongregationRepository;
 import com.igrejahub.finance.dto.FinancialAccountDto;
 import com.igrejahub.finance.entity.FinancialAccount;
 import com.igrejahub.finance.mapper.FinancialAccountMapper;
@@ -32,6 +33,7 @@ public class FinancialAccountService {
     private final FinancialAccountMapper     accountMapper;
     private final SecurityUtils              securityUtils;
     private final ChurchRepository           churchRepository;
+    private final CongregationRepository     congregationRepository;
 
     public Page<FinancialAccountDto> getAccounts(Pageable pageable) {
         Long orgId    = TenantContext.getCurrentTenant();
@@ -67,10 +69,36 @@ public class FinancialAccountService {
         return withChurchName(accountMapper.toDto(getOwnedAccount(id)));
     }
 
-    /** Identifica visualmente a Igreja de cada conta (útil para ROOT, que vê contas de várias Igrejas juntas). */
+    /**
+     * Contas de uma unidade específica da Igreja em operação, para o seletor em
+     * dois níveis (unidade → conta) das transferências financeiras.
+     * congregationId == null → contas da sede. Caso contrário, contas da
+     * Congregação informada — validada como pertencente à Igreja em operação.
+     */
+    public List<FinancialAccountDto> getActiveAccountsForUnit(Long congregationId) {
+        Long orgId    = TenantContext.getCurrentTenant();
+        Long churchId = securityUtils.getEffectiveChurchId();
+        if (churchId == null) return List.of();
+
+        if (congregationId == null) {
+            return accountRepository.findByOrganizationIdAndChurchIdAndCongregationIdIsNullAndActiveTrue(orgId, churchId)
+                .stream().map(accountMapper::toDto).map(this::withChurchName).toList();
+        }
+
+        if (!congregationRepository.existsByOrganizationIdAndIdAndChurchId(orgId, congregationId, churchId)) {
+            throw new BusinessException("Esta Congregação não pertence à Igreja em operação.");
+        }
+        return accountRepository.findByOrganizationIdAndCongregationIdAndActiveTrue(orgId, congregationId)
+            .stream().map(accountMapper::toDto).map(this::withChurchName).toList();
+    }
+
+    /** Identifica visualmente a Igreja/Congregação de cada conta (útil para ROOT, que vê contas de várias Igrejas juntas). */
     private FinancialAccountDto withChurchName(FinancialAccountDto dto) {
         if (dto.getChurchId() != null) {
             churchRepository.findById(dto.getChurchId()).ifPresent(c -> dto.setChurchName(c.getName()));
+        }
+        if (dto.getCongregationId() != null) {
+            congregationRepository.findById(dto.getCongregationId()).ifPresent(c -> dto.setCongregationName(c.getName()));
         }
         return dto;
     }
@@ -93,9 +121,14 @@ public class FinancialAccountService {
             }
         }
 
+        // A conta pertence à unidade onde o usuário está operando no momento:
+        // à Congregação em que "entrou", ou à sede quando não entrou em nenhuma.
+        Long targetCongregationId = securityUtils.canViewAll() ? null : TenantContext.getCurrentCongregationId();
+
         Long initialCents = FinancialAccountMapper.amountToCents(initialBalance);
         FinancialAccount account = FinancialAccount.builder()
             .churchId(targetChurchId)
+            .congregationId(targetCongregationId)
             .name(name)
             .type(FinancialAccount.AccountType.valueOf(type))
             .bankName(bankName)

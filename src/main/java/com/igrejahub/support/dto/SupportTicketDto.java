@@ -11,6 +11,8 @@ public class SupportTicketDto {
     private Long userId;
     private String userEmail;
     private String userName;
+    private Long churchId;
+    private String churchName;
     private String title;
     private String category;
     private String priority;

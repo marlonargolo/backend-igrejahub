@@ -59,11 +59,12 @@ public class FinancialTransferService {
         FinancialAccount from = accountService.getOwnedAccount(fromAccountId);
         FinancialAccount to = accountService.getOwnedAccount(toAccountId);
 
-        // Transferência entre Igrejas diferentes: só quem enxerga todas as Igrejas
-        // (ROOT em modo global) pode movimentar entre contas de Igrejas distintas.
-        // Demais perfis já são barrados antes disso: getOwnedAccount() recusa
-        // acesso a uma conta de outra Igreja.
-        if (!Objects.equals(from.getChurchId(), to.getChurchId()) && !securityUtils.canViewAll()) {
+        // Origem e destino precisam pertencer à MESMA Igreja (sede + suas
+        // Congregações compartilham o mesmo churchId, distinguidas apenas por
+        // congregationId). Isso vale sempre, inclusive para ROOT: a capacidade
+        // administrativa de enxergar várias Igrejas não pode transformar esta
+        // tela numa transferência entre instituições independentes.
+        if (!Objects.equals(from.getChurchId(), to.getChurchId())) {
             throw new BusinessException("Não é possível transferir entre contas de igrejas diferentes");
         }
         long cents = FinancialAccountMapper.amountToCents(amount);

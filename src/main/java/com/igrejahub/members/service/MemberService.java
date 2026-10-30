@@ -40,13 +40,33 @@ public class MemberService {
 
     public Page<MemberDto> getMembers(Pageable pageable, Long churchIdParam,
                                       Long congregationId, String status, String search) {
+        return getMembers(pageable, churchIdParam, congregationId, status, search, false);
+    }
+
+    /**
+     * @param congregationId quando informado a partir do contexto da sede, restringe
+     *                       (drill-down) à congregação escolhida — não é um pedido de
+     *                       visão consolidada.
+     * @param reportScope    pedido explícito de visão consolidada da Igreja (sede +
+     *                       suas congregações), usado pelos Relatórios. Nunca tem efeito
+     *                       quando o usuário está operacionalmente dentro de uma
+     *                       Congregação — essa restrição não pode ser contornada por
+     *                       parâmetro de consulta.
+     */
+    public Page<MemberDto> getMembers(Pageable pageable, Long churchIdParam,
+                                      Long congregationId, String status, String search,
+                                      boolean reportScope) {
+        if (reportScope && !securityUtils.isRoot() && !securityUtils.hasPermission("REPORT_VIEW")) {
+            throw new BusinessException("Sem permissão para consultar relatórios.");
+        }
+
         Long orgId  = TenantContext.getCurrentTenant();
         String s    = search != null && !search.isEmpty() ? search : null;
         Long effChurchId    = securityUtils.getEffectiveChurchId();
         Long effCongId      = TenantContext.getCurrentCongregationId();
 
-        log.debug("getMembers orgId={} effChurchId={} effCongId={} canViewAll={}",
-            orgId, effChurchId, effCongId, securityUtils.canViewAll());
+        log.debug("getMembers orgId={} effChurchId={} effCongId={} canViewAll={} reportScope={}",
+            orgId, effChurchId, effCongId, securityUtils.canViewAll(), reportScope);
 
         // ROOT modo global → todos da organização
         if (securityUtils.canViewAll()) {
@@ -54,10 +74,11 @@ public class MemberService {
                 .map(this::toDto);
         }
 
-        // Pastor de Congregação, ou ROOT/admin que "entrou" numa Congregação → só dela,
-        // a menos que tenha REPORT_VIEW_ALL (ex.: pastor responsável pela sede
-        // consultando relatórios de todas as Congregações da própria Igreja).
-        if (effCongId != null && !securityUtils.hasPermission("REPORT_VIEW_ALL")) {
+        // Dentro de uma Congregação, a listagem fica SEMPRE restrita a ela — mesmo
+        // com permissões administrativas amplas, e mesmo em pedido de relatório
+        // consolidado. Entrar numa Congregação e consultar relatórios consolidados
+        // pela sede são capacidades diferentes; uma não pode ampliar a outra.
+        if (effCongId != null) {
             return memberRepository.findByCongregationId(orgId, effCongId, status, s, pageable)
                 .map(this::toDto);
         }
@@ -66,10 +87,25 @@ public class MemberService {
         // ter resolvido nenhuma ainda → nunca cai no fallback de Igreja inteira.
         if (TenantContext.isMainChurchAccessDenied()) return Page.empty(pageable);
 
-        // Admin/Pastor da Igreja ou ROOT com contexto → filtra por churchId
+        // Admin/Pastor da Igreja ou ROOT com contexto → opera a partir da sede
         if (effChurchId == null) return Page.empty(pageable);
 
-        return memberRepository.findByChurchId(orgId, effChurchId, congregationId, status, s, pageable)
+        // Drill-down explícito: sede consultando uma Congregação específica.
+        if (congregationId != null) {
+            return memberRepository.findByChurchId(orgId, effChurchId, congregationId, status, s, pageable)
+                .map(this::toDto);
+        }
+
+        // Visão consolidada da Igreja (sede + todas as Congregações), só quando
+        // explicitamente pedida (ex.: Relatórios) e autorizada.
+        if (reportScope && securityUtils.hasPermission("REPORT_VIEW_ALL")) {
+            return memberRepository.findByChurchId(orgId, effChurchId, null, status, s, pageable)
+                .map(this::toDto);
+        }
+
+        // Padrão: listagem LOCAL da sede — só membros sem Congregação. Não mistura
+        // com membros já transferidos para uma Congregação da própria Igreja.
+        return memberRepository.findLocalByChurchId(orgId, effChurchId, status, s, pageable)
             .map(this::toDto);
     }
 

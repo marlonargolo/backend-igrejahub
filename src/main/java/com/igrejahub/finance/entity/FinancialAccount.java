@@ -14,6 +14,9 @@ import lombok.*;
 public class FinancialAccount extends BaseEntity {
     @Column(name = "church_id")
     private Long churchId;
+    /** NULL = conta da sede. Caso contrário, pertence à Congregação com este id. */
+    @Column(name = "congregation_id")
+    private Long congregationId;
     @Column(name = "name", nullable = false, length = 100)
     private String name;
     @Enumerated(EnumType.STRING)

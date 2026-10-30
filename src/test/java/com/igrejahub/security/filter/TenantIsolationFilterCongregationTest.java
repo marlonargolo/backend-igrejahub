@@ -25,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -80,11 +81,15 @@ class TenantIsolationFilterCongregationTest {
     }
 
     @Test
-    void churchAdmin_entersOwnChurchCongregation_viaHeader() throws Exception {
+    void churchAdmin_entersExplicitlyLinkedCongregation_viaHeader() throws Exception {
+        // Mesmo com acesso à sede habilitado, entrar numa Congregação específica
+        // exige vínculo explícito em user_congregation_access.
         authenticateAs(churchAdmin(1L, 10L));
         when(request.getRequestURI()).thenReturn("/dashboard");
         when(request.getHeader("X-Congregation-Id")).thenReturn("100");
-        when(congregationRepository.existsByOrganizationIdAndIdAndChurchId(1L, 100L, 10L)).thenReturn(true);
+        when(jdbcTemplate.queryForList(
+            eq("SELECT congregation_id FROM user_congregation_access WHERE user_id = ?"),
+            eq(Long.class), eq(1L))).thenReturn(List.of(100L));
 
         Long[] captured = new Long[1];
         org.mockito.Mockito.doAnswer(inv -> {
@@ -102,7 +107,9 @@ class TenantIsolationFilterCongregationTest {
         authenticateAs(churchAdmin(1L, 10L));
         when(request.getRequestURI()).thenReturn("/dashboard");
         when(request.getHeader("X-Congregation-Id")).thenReturn("999");
-        when(congregationRepository.existsByOrganizationIdAndIdAndChurchId(1L, 999L, 10L)).thenReturn(false);
+        when(jdbcTemplate.queryForList(
+            eq("SELECT congregation_id FROM user_congregation_access WHERE user_id = ?"),
+            eq(Long.class), eq(1L))).thenReturn(List.of(100L));
 
         Long[] captured = new Long[1];
         org.mockito.Mockito.doAnswer(inv -> {
@@ -113,6 +120,55 @@ class TenantIsolationFilterCongregationTest {
         newFilter().doFilter(request, response, filterChain);
 
         assertNull(captured[0], "congregação de outra Igreja nunca é aplicada");
+    }
+
+    @Test
+    void churchAdmin_withMainChurchEnabled_cannotEnterCongregationWithoutExplicitGrant() throws Exception {
+        // Reproduz o bug da Gabriela: sede habilitada + Paranaguá concedida,
+        // Pinhais NÃO concedida — mesmo pertencendo à mesma Igreja, Pinhais
+        // não pode ser acessada só porque a sede está habilitada.
+        authenticateAs(churchAdmin(1L, 10L));
+        when(request.getRequestURI()).thenReturn("/dashboard");
+        when(request.getHeader("X-Congregation-Id")).thenReturn("300"); // Pinhais
+        when(jdbcTemplate.queryForList(
+            eq("SELECT congregation_id FROM user_congregation_access WHERE user_id = ?"),
+            eq(Long.class), eq(1L))).thenReturn(List.of(200L)); // só Paranaguá concedida
+
+        Long[] captured = new Long[1];
+        org.mockito.Mockito.doAnswer(inv -> {
+            captured[0] = TenantContext.getCurrentCongregationId();
+            return null;
+        }).when(filterChain).doFilter(request, response);
+
+        newFilter().doFilter(request, response, filterChain);
+
+        assertNull(captured[0], "sede habilitada nunca amplia os vínculos de Congregação");
+        verify(congregationRepository, org.mockito.Mockito.never())
+            .existsByOrganizationIdAndIdAndChurchId(any(), any(), any());
+    }
+
+    @Test
+    void churchAdmin_withMainChurchEnabled_andNoHeader_staysAtSede() throws Exception {
+        // Sem header, mesmo com Congregações vinculadas, não "entra" sozinho em
+        // nenhuma — ausência de header com sede habilitada significa ficar na sede.
+        authenticateAs(churchAdmin(1L, 10L));
+        when(request.getRequestURI()).thenReturn("/dashboard");
+        when(jdbcTemplate.queryForList(
+            eq("SELECT congregation_id FROM user_congregation_access WHERE user_id = ?"),
+            eq(Long.class), eq(1L))).thenReturn(List.of(200L));
+
+        Long[] captured = new Long[1];
+        boolean[] capturedDenied = new boolean[1];
+        org.mockito.Mockito.doAnswer(inv -> {
+            captured[0] = TenantContext.getCurrentCongregationId();
+            capturedDenied[0] = TenantContext.isMainChurchAccessDenied();
+            return null;
+        }).when(filterChain).doFilter(request, response);
+
+        newFilter().doFilter(request, response, filterChain);
+
+        assertNull(captured[0]);
+        assertFalse(capturedDenied[0], "sede continua acessível normalmente");
     }
 
     @Test

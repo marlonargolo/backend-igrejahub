@@ -37,4 +37,14 @@ public interface FinancialAccountRepository extends BaseRepository<FinancialAcco
     /** Todas as contas de uma Igreja (para admin) */
     Page<FinancialAccount> findByOrganizationIdAndChurchId(
         Long organizationId, Long churchId, Pageable pageable);
+
+    // ── Seleção em dois níveis (Vídeo 2): unidade → conta ──────────────────────
+
+    /** Contas ativas da sede (sem Congregação) de uma Igreja. */
+    List<FinancialAccount> findByOrganizationIdAndChurchIdAndCongregationIdIsNullAndActiveTrue(
+        Long organizationId, Long churchId);
+
+    /** Contas ativas de uma Congregação específica. */
+    List<FinancialAccount> findByOrganizationIdAndCongregationIdAndActiveTrue(
+        Long organizationId, Long congregationId);
 }

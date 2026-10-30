@@ -96,11 +96,15 @@ public class TenantIsolationFilter extends OncePerRequestFilter {
                     // numa Congregação específica.
                     TenantContext.setMainChurchAccessDenied(true);
                     TenantContext.setCurrentCongregationId(
-                        resolveRestrictedCongregationId(request, user));
+                        resolveLinkedCongregationId(request, user, true));
                 } else {
+                    // Acesso à sede habilitado: concede SOMENTE a sede. Entrar numa
+                    // Congregação específica continua exigindo vínculo explícito em
+                    // user_congregation_access — autorizar a sede nunca amplia
+                    // automaticamente os vínculos de Congregação.
                     TenantContext.setMainChurchAccessDenied(false);
                     TenantContext.setCurrentCongregationId(
-                        resolveEnteredCongregationId(request, user.getOrganizationId(), user.getChurchId()));
+                        resolveLinkedCongregationId(request, user, false));
                 }
             }
         }
@@ -136,19 +140,24 @@ public class TenantIsolationFilter extends OncePerRequestFilter {
     }
 
     /**
-     * Usuário com accessMainChurch=false: só pode estar numa das Congregações
-     * em user_congregation_access — nunca pode ver a Igreja inteira. Se tiver
-     * só uma vinculada, resolve automaticamente; com mais de uma, precisa do
-     * header X-Congregation-Id (validado contra a própria lista de vínculos,
-     * não contra "pertence à mesma Igreja" como no caso do admin normal).
+     * Resolve em qual Congregação o usuário (não-ROOT) está operando, a partir
+     * de user_congregation_access — a ÚNICA fonte de verdade para quais
+     * Congregações ele pode entrar, com ou sem acesso à sede habilitado.
+     * Autorizar a sede (accessMainChurch=true) concede somente a sede: entrar
+     * numa Congregação específica sempre exige o vínculo explícito aqui.
+     *
+     * @param autoResolveSingle quando não há header e existe exatamente um
+     *                          vínculo, resolve automaticamente para ele — só
+     *                          faz sentido para quem NÃO tem acesso à sede
+     *                          (sem isso, não haveria unidade nenhuma pra
+     *                          operar). Com sede habilitada, a ausência do
+     *                          header significa "ficar na sede", nunca
+     *                          escolhe uma Congregação sozinho.
      */
-    private Long resolveRestrictedCongregationId(HttpServletRequest request, UserPrincipal user) {
+    private Long resolveLinkedCongregationId(HttpServletRequest request, UserPrincipal user, boolean autoResolveSingle) {
         List<Long> linked = jdbcTemplate.queryForList(
             "SELECT congregation_id FROM user_congregation_access WHERE user_id = ?",
             Long.class, user.getId());
-        if (linked.isEmpty()) {
-            return null;
-        }
 
         String header = request.getHeader("X-Congregation-Id");
         if (header != null && !header.isBlank()) {
@@ -160,7 +169,7 @@ public class TenantIsolationFilter extends OncePerRequestFilter {
             }
         }
 
-        return linked.size() == 1 ? linked.get(0) : null;
+        return (autoResolveSingle && linked.size() == 1) ? linked.get(0) : null;
     }
 
     @Override
