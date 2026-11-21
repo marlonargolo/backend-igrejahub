@@ -128,6 +128,39 @@ class FinancialAccountServiceIsolationTest {
     }
 
     @Test
+    void getActiveAccounts_atSede_returnsOnlySedeLocalAccounts_notCongregationAccounts() {
+        // Reproduz o bug: Contabilidade/Receitas/Despesas misturavam contas
+        // da sede com as de todas as Congregações.
+        TenantContext.setCurrentTenant(1L);
+        TenantContext.setCurrentCongregationId(null);
+        when(securityUtils.canViewAll()).thenReturn(false);
+        when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
+        when(accountRepository.findByOrganizationIdAndChurchIdAndCongregationIdIsNullAndActiveTrue(1L, 10L))
+            .thenReturn(java.util.List.of());
+
+        newService().getActiveAccounts();
+
+        verify(accountRepository).findByOrganizationIdAndChurchIdAndCongregationIdIsNullAndActiveTrue(1L, 10L);
+        verify(accountRepository, never()).findByOrganizationIdAndChurchIdAndActiveTrue(any(), any());
+    }
+
+    @Test
+    void getActiveAccounts_insideCongregation_returnsOnlyThatCongregationsAccounts() {
+        TenantContext.setCurrentTenant(1L);
+        TenantContext.setCurrentCongregationId(200L);
+        when(securityUtils.canViewAll()).thenReturn(false);
+        when(securityUtils.getEffectiveChurchId()).thenReturn(10L);
+        when(congregationRepository.existsByOrganizationIdAndIdAndChurchId(1L, 200L, 10L)).thenReturn(true);
+        when(accountRepository.findByOrganizationIdAndCongregationIdAndActiveTrue(1L, 200L))
+            .thenReturn(java.util.List.of());
+
+        newService().getActiveAccounts();
+
+        verify(accountRepository).findByOrganizationIdAndCongregationIdAndActiveTrue(1L, 200L);
+        verify(accountRepository, never()).findByOrganizationIdAndChurchIdAndCongregationIdIsNullAndActiveTrue(any(), any());
+    }
+
+    @Test
     void getActiveAccountsForUnit_noCongregation_returnsSedeLocalAccounts() {
         TenantContext.setCurrentTenant(1L);
         when(securityUtils.getEffectiveChurchId()).thenReturn(10L);

@@ -41,13 +41,17 @@ public class MemberTransferService {
             .orElseThrow(() -> new ResourceNotFoundException("Member", memberId));
 
         Long orgId = TenantContext.getCurrentTenant();
-        if (!congregationRepository.existsByOrganizationIdAndIdAndChurchId(orgId, toCongregationId, member.getChurchId())) {
+        // toCongregationId == null → transferência de volta para a sede.
+        if (toCongregationId != null
+                && !congregationRepository.existsByOrganizationIdAndIdAndChurchId(orgId, toCongregationId, member.getChurchId())) {
             throw new BusinessException("A congregação destino não pertence à mesma Igreja do membro.");
         }
 
         Long fromCongregationId = member.getCongregationId();
-        if (toCongregationId.equals(fromCongregationId)) {
-            throw new BusinessException("O membro já está nesta congregação.");
+        if (java.util.Objects.equals(toCongregationId, fromCongregationId)) {
+            throw new BusinessException(toCongregationId == null
+                ? "O membro já está na sede."
+                : "O membro já está nesta congregação.");
         }
 
         member.setCongregationId(toCongregationId);
@@ -103,8 +107,9 @@ public class MemberTransferService {
             ? congregationRepository.findById(t.getFromCongregationId())
                 .map(c -> c.getName()).orElse(null)
             : null;
-        String toName = congregationRepository.findById(t.getToCongregationId())
-            .map(c -> c.getName()).orElse("—");
+        String toName = t.getToCongregationId() == null ? "Sede"
+            : congregationRepository.findById(t.getToCongregationId())
+                .map(c -> c.getName()).orElse("—");
         return toDto(t, memberName, fromName, toName);
     }
 

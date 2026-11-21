@@ -29,7 +29,8 @@ public class MemberTransfer {
     @Column(name = "from_congregation_id")
     private Long fromCongregationId;
 
-    @Column(name = "to_congregation_id", nullable = false)
+    /** NULL = transferido de volta para a sede (sem congregação). */
+    @Column(name = "to_congregation_id")
     private Long toCongregationId;
 
     @Column(name = "reason", columnDefinition = "TEXT")

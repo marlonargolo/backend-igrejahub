@@ -1,6 +1,5 @@
 package com.igrejahub.members.dto;
 
-import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -11,7 +10,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class TransferMemberRequest {
-    @NotNull(message = "Congregação destino é obrigatória")
+    /** NULL = transferir de volta para a sede (sem congregação). */
     private Long toCongregationId;
 
     private String reason;
