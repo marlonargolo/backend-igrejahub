@@ -45,24 +45,29 @@ public class FinancialAccountService {
                 .map(accountMapper::toDto).map(this::withChurchName);
         }
 
-        // Demais → só da Igreja
+        // Demais → só da Igreja (gestão administrativa: sede e congregações
+        // juntas, para quem está habilitado a gerenciar contas da Igreja toda)
         if (churchId == null) return Page.empty(pageable);
         return accountRepository.findByOrganizationIdAndChurchId(orgId, churchId, pageable)
             .map(accountMapper::toDto).map(this::withChurchName);
     }
 
+    /**
+     * Contas ativas da unidade em operação no momento — nunca mistura a sede
+     * com as Congregações. Dentro de uma Congregação, só as dela; na sede, só
+     * as da sede (congregationId NULL).
+     */
     public List<FinancialAccountDto> getActiveAccounts() {
-        Long orgId    = TenantContext.getCurrentTenant();
-        Long churchId = securityUtils.getEffectiveChurchId();
-
         if (securityUtils.canViewAll()) {
-            return accountRepository.findByOrganizationIdAndActiveTrue(orgId)
+            return accountRepository.findByOrganizationIdAndActiveTrue(TenantContext.getCurrentTenant())
                 .stream().map(accountMapper::toDto).map(this::withChurchName).toList();
         }
-
-        if (churchId == null) return List.of();
-        return accountRepository.findByOrganizationIdAndChurchIdAndActiveTrue(orgId, churchId)
-            .stream().map(accountMapper::toDto).map(this::withChurchName).toList();
+        // Restrito às Congregações vinculadas e sem ter resolvido nenhuma ainda
+        // → nunca cai no fallback de contas da sede.
+        if (TenantContext.isMainChurchAccessDenied() && TenantContext.getCurrentCongregationId() == null) {
+            return List.of();
+        }
+        return getActiveAccountsForUnit(TenantContext.getCurrentCongregationId());
     }
 
     public FinancialAccountDto getAccount(Long id) {

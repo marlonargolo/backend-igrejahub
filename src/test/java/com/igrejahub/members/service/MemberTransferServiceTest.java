@@ -85,6 +85,44 @@ class MemberTransferServiceTest {
     }
 
     @Test
+    void transferMember_backToSede_clearsCongregationAndRecordsTransfer() {
+        TenantContext.setCurrentTenant(1L);
+        TenantContext.setCurrentUserId(7L);
+        Member member = new Member();
+        member.setId(5L);
+        member.setChurchId(10L);
+        member.setCongregationId(100L);
+        member.setName("Fulano");
+        when(memberRepository.findById(5L)).thenReturn(Optional.of(member));
+        when(transferRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        newService().transferMember(5L, null, "voltou pra sede");
+
+        assertEquals(null, member.getCongregationId());
+        verify(memberRepository).save(member);
+        verify(congregationRepository, never()).existsByOrganizationIdAndIdAndChurchId(any(), any(), any());
+        ArgumentCaptor<com.igrejahub.members.entity.MemberTransfer> captor =
+            ArgumentCaptor.forClass(com.igrejahub.members.entity.MemberTransfer.class);
+        verify(transferRepository).save(captor.capture());
+        assertEquals(100L, captor.getValue().getFromCongregationId());
+        assertEquals(null, captor.getValue().getToCongregationId());
+    }
+
+    @Test
+    void transferMember_alreadyAtSede_rejectsTransferToSede() {
+        TenantContext.setCurrentTenant(1L);
+        Member member = new Member();
+        member.setId(5L);
+        member.setChurchId(10L);
+        member.setCongregationId(null);
+        when(memberRepository.findById(5L)).thenReturn(Optional.of(member));
+
+        MemberTransferService service = newService();
+        assertThrows(BusinessException.class, () -> service.transferMember(5L, null, null));
+        verify(transferRepository, never()).save(any());
+    }
+
+    @Test
     void transferMember_toSameCongregation_isRejected() {
         TenantContext.setCurrentTenant(1L);
         Member member = new Member();
